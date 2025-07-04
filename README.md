@@ -12,6 +12,9 @@ This is work in progress.
 ## Requirements
 - [Python](https://www.python.org/downloads/) >= 3.10
 - see requirements.txt 
+```sh
+pip install -r requirements.txt
+```
 
 ## Usage
 Run from the command line:
