@@ -1,0 +1,8 @@
+venv/
+.vscode/
+# harvested data
+harvests_*/ 
+# last harvest date info
+last_harvest_*.txt
+# old or test versions of the script
+testne_verzije_skripte/
