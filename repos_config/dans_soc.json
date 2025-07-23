@@ -1,0 +1,7 @@
+{
+    "protocol": "OAI-PMH",
+    "repository_url": "https://ssh.datastations.nl/oai",
+    "repository_suffix": "DANS_soc",
+    "last_harvest_date": "",
+    "metadata_prefix": "oai_dc"
+  }
