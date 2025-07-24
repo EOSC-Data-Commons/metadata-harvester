@@ -79,7 +79,7 @@ def main():
                 f.write('</records>')
 
             if harvested_any:
-                config["last_harvest"] = today
+                config["last_harvest_date"] = today
                 save_repo_config(config_path, config)
                 print(f"Harvest successful. Saved to: {output_path}")
             else:
