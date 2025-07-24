@@ -5,46 +5,21 @@ import os
 import argparse
 from datetime import datetime
 from lxml import etree as ET
+import json
 from oaipmh_scythe import Scythe
 from oaipmh_scythe.iterator import OAIResponseIterator
 
-# list of repositories together with suffixes to be added to harvests folders
-REPOSITORIES = {
-    "https://archaeology.datastations.nl/oai": "DANS_arch",
-    "https://ssh.datastations.nl/oai": "DANS_soc",
-    "https://lifesciences.datastations.nl/oai": "DANS_life",
-    "https://phys-techsciences.datastations.nl/oai": "DANS_phystech",
-    "https://dataverse.nl/oai": "DANS_gen",
-    "https://dabar.srce.hr/oai": "DABAR",
-    "https://www.swissubase.ch/oai-pmh/v1/oai": "SWISS",
-    "https://api.archives-ouvertes.fr/oai/hal": "HAL"
-}
-METADATA_PREFIX = "oai_dc"
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
 
-# suffix to be added to the folder with harvests and to the file with last harvest info 
-def get_repo_suffix(repo_url):
-    return REPOSITORIES.get(repo_url, "UNKNOWN")
+# load json with config data for the repository
+def load_repo_config(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-# (create and) get path for the folder with harvests, and for the file with last harvest info
-def get_paths(repo_url):
-    suffix = get_repo_suffix(repo_url)
-    harvests_folder = f"harvests_{suffix}"
-    os.makedirs(harvests_folder, exist_ok=True)
-    last_harvest_info = f"last_harvest_{suffix}.txt"
-    return harvests_folder, last_harvest_info
-
-# get last harvest date from the file, or None if this is an initial harvest
-def load_last_harvest_date(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return f.read().strip()
-    return None
-
-# (create last harvest file and) save the date of the last harvest 
-def save_last_harvest_date(path, date):
-    with open(path, "w") as f:
-        f.write(date)
+# save new config data (i.e. update last harvest date)
+def save_repo_config(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 # take oai-pmh response and return only the records
 def extract_records_from_response(xml_root):
@@ -53,27 +28,34 @@ def extract_records_from_response(xml_root):
 
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
-    parser.add_argument("repository", help="URL of the repository's OAI-PMH endpoint (e.g. https://ssh.datastations.nl/oai)")
+    parser.add_argument("config_file", help="Path to repository config JSON file")
     args = parser.parse_args()
 
-    repository = args.repository
-    harvests_folder, last_harvest_info = get_paths(repository)
+    config_path = args.config_file
+    config = load_repo_config(config_path)
 
-    last_harvest = load_last_harvest_date(last_harvest_info)
+    repo_url = config["repository_url"]
+    suffix = config["repository_suffix"]
+    metadata_prefix = config.get("metadata_prefix", "oai_dc")
+    last_harvest = config.get("last_harvest_date")
+
+    harvests_folder = f"harvests_{suffix}"
+    os.makedirs(harvests_folder, exist_ok=True)
+
     today = datetime.today().strftime("%Y-%m-%d")
 
     try:
-        with Scythe(repository, iterator=OAIResponseIterator) as client:
+        with Scythe(repo_url, iterator=OAIResponseIterator) as client:
             if last_harvest:
                 print(f"Incremental harvest since {last_harvest}")
                 responses = client.list_records(
                     from_=last_harvest,
-                    metadata_prefix=METADATA_PREFIX
+                    metadata_prefix=metadata_prefix
                 )
                 is_initial = False
             else:
                 print("First harvest, fetching all records.")
-                responses = client.list_records(metadata_prefix=METADATA_PREFIX)
+                responses = client.list_records(metadata_prefix=metadata_prefix)
                 is_initial = True
 
             output_path = os.path.join(
@@ -97,7 +79,8 @@ def main():
                 f.write('</records>')
 
             if harvested_any:
-                save_last_harvest_date(last_harvest_info, today)
+                config["last_harvest"] = today
+                save_repo_config(config_path, config)
                 print(f"Harvest successful. Saved to: {output_path}")
             else:
                 print("No new records harvested. No file created.")
