@@ -55,7 +55,7 @@ def main():
                 print("First harvest, fetching all records.")
                 records = client.list_records(metadata_prefix=metadata_prefix)
 
-            harvested_any = False
+            record_count = 0
 
             for record in records:
                 identifier = record.header.identifier
@@ -65,12 +65,13 @@ def main():
 
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
-                    harvested_any = True
 
-            if harvested_any:
+                record_count += 1  
+
+            if record_count > 0:
                 config["last_harvest_date"] = today
                 save_repo_config(config_path, config)
-                print(f"Harvest successful. Saved to: {harvests_folder}")
+                print(f"Harvested {record_count} records. Saved to: {harvests_folder}")
             else:
                 print("No new records harvested.")
 
