@@ -23,7 +23,34 @@ def save_repo_config(path, data):
 # clean up OAI identifier for use in file names
 def clean_identifier(oai_identifier):
     # replace problematic characters
-    return oai_identifier.replace("/", "_").replace(":", "_")
+    return oai_identifier.replace("/", "_").replace("\\", "_").replace(":", "_")
+
+# save record if it's the latest version
+def save_record(record, metadata_prefix, harvests_folder):
+    identifier = record.header.identifier
+    clean_id = clean_identifier(identifier)
+    filename = f"{clean_id}.{metadata_prefix}.xml"
+    filepath = os.path.join(harvests_folder, filename)
+
+    # check if file already exists
+    if os.path.exists(filepath):
+        try:
+            # parse existing file to get its datestamp
+            existing_tree = ET.parse(filepath)
+            existing_root = existing_tree.getroot()
+            existing_datestamp = existing_root.findtext(".//oai:datestamp", namespaces=NS)
+
+            if existing_datestamp and existing_datestamp >= record.header.datestamp:
+                # existing file is newer - skip this record
+                return False
+        except Exception as e:
+            print(f"Warning: could not compare with existing record '{filename}', overwriting file: {e}")
+
+    # if the record is new(er), save it
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+
+    return True
 
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
@@ -53,20 +80,16 @@ def main():
                 )
             else:
                 print("First harvest, fetching all records.")
-                records = client.list_records(metadata_prefix=metadata_prefix)
+                records = client.list_records(
+                    metadata_prefix=metadata_prefix,
+                    ignore_deleted=True
+                )
 
             record_count = 0
 
             for record in records:
-                identifier = record.header.identifier
-                clean_id = clean_identifier(identifier)
-                filename = f"{clean_id}.{metadata_prefix}.xml"
-                filepath = os.path.join(harvests_folder, filename)
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
-
-                record_count += 1  
+                if save_record(record, metadata_prefix, harvests_folder):
+                    record_count += 1  
 
             if record_count > 0:
                 config["last_harvest_date"] = today
