@@ -10,3 +10,4 @@ with open('DABAR_json/oai_dabar.srce.hr_agr_3356.oai_datacite.xml.json') as f:
 
 
 print(json.dumps([one, two]))
+#print(json.dumps(one))
