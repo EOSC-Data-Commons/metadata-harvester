@@ -3,5 +3,6 @@
   "repository_url": "https://phys-techsciences.datastations.nl/oai",
   "repository_suffix": "DANS_phystech",
   "last_harvest_date": "",
-  "metadata_prefix": "oai_dc"
+  "metadata_prefix": "oai_datacite",
+  "set": ""
 }

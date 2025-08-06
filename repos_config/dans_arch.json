@@ -3,5 +3,6 @@
     "repository_url": "https://archaeology.datastations.nl/oai",
     "repository_suffix": "DANS_arch",
     "last_harvest_date": "",
-    "metadata_prefix": "oai_dc"
+    "metadata_prefix": "oai_datacite",
+    "set": ""
   }
