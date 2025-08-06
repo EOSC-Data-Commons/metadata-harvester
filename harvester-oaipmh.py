@@ -64,11 +64,10 @@ def main():
     suffix = config["repository_suffix"]
     metadata_prefix = config.get("metadata_prefix", "oai_dc")
     last_harvest = config.get("last_harvest_date")
+    set = config.get("set")
 
     harvests_folder = f"harvests_{suffix}"
     os.makedirs(harvests_folder, exist_ok=True)
-
-    today = datetime.today().strftime("%Y-%m-%d")
 
     try:
         with Scythe(repo_url) as client:
@@ -76,12 +75,14 @@ def main():
                 print(f"Incremental harvest since {last_harvest}")
                 records = client.list_records(
                     from_=last_harvest,
-                    metadata_prefix=metadata_prefix
+                    metadata_prefix=metadata_prefix,
+                    set_=set
                 )
             else:
                 print("First harvest, fetching all records.")
                 records = client.list_records(
                     metadata_prefix=metadata_prefix,
+                    set_=set,
                     ignore_deleted=True
                 )
 
@@ -92,6 +93,7 @@ def main():
                     record_count += 1  
 
             if record_count > 0:
+                today = datetime.today().strftime("%Y-%m-%d")
                 config["last_harvest_date"] = today
                 save_repo_config(config_path, config)
                 print(f"Harvested {record_count} records. Saved to: {harvests_folder}")

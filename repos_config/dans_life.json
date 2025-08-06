@@ -2,7 +2,7 @@
   "protocol": "OAI-PMH",
   "repository_url": "https://lifesciences.datastations.nl/oai",
   "repository_suffix": "DANS_life",
-  "last_harvest_date": "",
+  "last_harvest_date": "2025-08-06",
   "metadata_prefix": "oai_datacite",
-  "set": ""
+  "set": null
 }
