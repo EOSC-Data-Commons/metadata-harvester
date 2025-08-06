@@ -1,4 +1,5 @@
 venv/
+env/
 .vscode/
 # harvested data
 harvests_*/ 
@@ -6,3 +7,5 @@ harvests_*/
 last_harvest_*.txt
 # old or test versions of the script
 testne_verzije_skripte/
+*json/
+.idea/*
