@@ -6,7 +6,7 @@ def harmonize_props(entry: dict, field_name: str):
     if isinstance(entry[field_name], str):
         return entry
     elif isinstance(entry[field_name], dict):
-        return {field_name: entry[field_name]['#text']}
+        return {field_name: entry[field_name]['#text'], 'lang': entry[field_name].get('@xml:lang')}
     else:
         raise Exception('Neither string nor dict')
 
