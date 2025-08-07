@@ -1,0 +1,8 @@
+{
+  "protocol": "OAI-PMH",
+  "repository_url": "https://dataverse.nl/oai",
+  "repository_suffix": "DANS_gen",
+  "last_harvest_date": "",
+  "metadata_prefix": "oai_datacite",
+  "set": null
+}

@@ -5,103 +5,100 @@ import os
 import argparse
 from datetime import datetime
 from lxml import etree as ET
+import json
 from oaipmh_scythe import Scythe
-from oaipmh_scythe.iterator import OAIResponseIterator
 
-# list of repositories together with suffixes to be added to harvests folders
-REPOSITORIES = {
-    "https://archaeology.datastations.nl/oai": "DANS_arch",
-    "https://ssh.datastations.nl/oai": "DANS_soc",
-    "https://lifesciences.datastations.nl/oai": "DANS_life",
-    "https://phys-techsciences.datastations.nl/oai": "DANS_phystech",
-    "https://dataverse.nl/oai": "DANS_gen",
-    "https://dabar.srce.hr/oai": "DABAR",
-    "https://www.swissubase.ch/oai-pmh/v1/oai": "SWISS",
-    "https://api.archives-ouvertes.fr/oai/hal": "HAL"
-}
-METADATA_PREFIX = "oai_dc"
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
 
-# suffix to be added to the folder with harvests and to the file with last harvest info 
-def get_repo_suffix(repo_url):
-    return REPOSITORIES.get(repo_url, "UNKNOWN")
+# load json with config data for the repository
+def load_repo_config(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-# (create and) get path for the folder with harvests, and for the file with last harvest info
-def get_paths(repo_url):
-    suffix = get_repo_suffix(repo_url)
-    harvests_folder = f"harvests_{suffix}"
-    os.makedirs(harvests_folder, exist_ok=True)
-    last_harvest_info = f"last_harvest_{suffix}.txt"
-    return harvests_folder, last_harvest_info
+# save new config data (i.e. update last harvest date)
+def save_repo_config(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
-# get last harvest date from the file, or None if this is an initial harvest
-def load_last_harvest_date(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return f.read().strip()
-    return None
+# clean up OAI identifier for use in file names
+def clean_identifier(oai_identifier):
+    # replace problematic characters
+    return oai_identifier.replace("/", "_").replace("\\", "_").replace(":", "_")
 
-# (create last harvest file and) save the date of the last harvest 
-def save_last_harvest_date(path, date):
-    with open(path, "w") as f:
-        f.write(date)
+# save record if it's the latest version
+def save_record(record, metadata_prefix, harvests_folder):
+    identifier = record.header.identifier
+    clean_id = clean_identifier(identifier)
+    filename = f"{clean_id}.{metadata_prefix}.xml"
+    filepath = os.path.join(harvests_folder, filename)
 
-# take oai-pmh response and return only the records
-def extract_records_from_response(xml_root):
-    list_records = xml_root.find("oai:ListRecords", NS)
-    return list_records.findall("oai:record", NS)
+    # check if file already exists
+    if os.path.exists(filepath):
+        try:
+            # parse existing file to get its datestamp
+            existing_tree = ET.parse(filepath)
+            existing_root = existing_tree.getroot()
+            existing_datestamp = existing_root.findtext(".//oai:datestamp", namespaces=NS)
+
+            if existing_datestamp and existing_datestamp >= record.header.datestamp:
+                # existing file is newer - skip this record
+                return False
+        except Exception as e:
+            print(f"Warning: could not compare with existing record '{filename}', overwriting file: {e}")
+
+    # if the record is new(er), save it
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+
+    return True
 
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
-    parser.add_argument("repository", help="URL of the repository's OAI-PMH endpoint (e.g. https://ssh.datastations.nl/oai)")
+    parser.add_argument("config_file", help="Path to repository config JSON file")
     args = parser.parse_args()
 
-    repository = args.repository
-    harvests_folder, last_harvest_info = get_paths(repository)
+    config_path = args.config_file
+    config = load_repo_config(config_path)
 
-    last_harvest = load_last_harvest_date(last_harvest_info)
-    today = datetime.today().strftime("%Y-%m-%d")
+    repo_url = config["repository_url"]
+    suffix = config["repository_suffix"]
+    metadata_prefix = config.get("metadata_prefix", "oai_dc")
+    last_harvest = config.get("last_harvest_date")
+    set = config.get("set")
+
+    harvests_folder = f"harvests_{suffix}"
+    os.makedirs(harvests_folder, exist_ok=True)
 
     try:
-        with Scythe(repository, iterator=OAIResponseIterator) as client:
+        with Scythe(repo_url) as client:
             if last_harvest:
                 print(f"Incremental harvest since {last_harvest}")
-                responses = client.list_records(
+                records = client.list_records(
                     from_=last_harvest,
-                    metadata_prefix=METADATA_PREFIX
+                    metadata_prefix=metadata_prefix,
+                    set_=set
                 )
-                is_initial = False
             else:
                 print("First harvest, fetching all records.")
-                responses = client.list_records(metadata_prefix=METADATA_PREFIX)
-                is_initial = True
+                records = client.list_records(
+                    metadata_prefix=metadata_prefix,
+                    set_=set,
+                    ignore_deleted=True
+                )
 
-            output_path = os.path.join(
-                harvests_folder,
-                f"{'initial_harvest' if is_initial else 'harvest'}_{today}.xml"
-            )
+            record_count = 0
 
-            harvested_any = False
+            for record in records:
+                if save_record(record, metadata_prefix, harvests_folder):
+                    record_count += 1  
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-                f.write('<records>\n')
-
-                for oai_response in responses:
-                    records = extract_records_from_response(oai_response.xml)
-                    for record in records:
-                        f.write(ET.tostring(record, pretty_print=True, encoding="unicode"))
-                        f.write("\n")
-                        harvested_any = True
-
-                f.write('</records>')
-
-            if harvested_any:
-                save_last_harvest_date(last_harvest_info, today)
-                print(f"Harvest successful. Saved to: {output_path}")
+            if record_count > 0:
+                today = datetime.today().strftime("%Y-%m-%d")
+                config["last_harvest_date"] = today
+                save_repo_config(config_path, config)
+                print(f"Harvested {record_count} records. Saved to: {harvests_folder}")
             else:
-                print("No new records harvested. No file created.")
-                os.remove(output_path)  
+                print("No new records harvested.")
 
     except Exception as e:
         print(f"An error occurred during harvesting: {e}")

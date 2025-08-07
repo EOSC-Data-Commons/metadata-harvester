@@ -1,0 +1,8 @@
+{
+    "protocol": "OAI-PMH",
+    "repository_url": "https://www.swissubase.ch/oai-pmh/v1/oai",
+    "repository_suffix": "SWISS",
+    "last_harvest_date": "",
+    "metadata_prefix": "oai_ddi25",
+    "set": null
+  }

@@ -1,0 +1,8 @@
+{
+    "protocol": "OAI-PMH",
+    "repository_url": "https://api.archives-ouvertes.fr/oai/hal",
+    "repository_suffix": "HAL",
+    "last_harvest_date": "",
+    "metadata_prefix": "oai_datacite",
+    "set": null
+  }
