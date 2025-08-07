@@ -1,7 +1,21 @@
-import json
+
+
+def harmonize_creator(entry: dict):
+    cr =  entry['creator']
+
+    if isinstance(cr['creatorName'], str):
+        return {
+            'creatorName': cr['creatorName']
+        }
+    else:
+        return {
+            **harmonize_props(cr, 'creatorName', {'@nameType': 'nameType'})
+        }
+
+
 
 def harmonize_props(entry: dict, field_name: str, value_map: dict):
-    #print(type(entry), field_name)
+    #print(type(entry), field_name, entry)
 
     if isinstance(entry[field_name], str):
         return entry
@@ -50,6 +64,6 @@ def normalize_datacite_json(input: dict):
     return {
         'titles': list(map(lambda el: harmonize_props(el, 'title', {'@xml:lang': 'lang', '@titleType': 'titleType' }), make_array(input['titles'], 'title'))),
         'subjects': list(map(lambda el: harmonize_props(el, 'subject', {'@xml:lang': 'lang'}), make_array(input['subjects'], 'subject'))),
-        'creators': make_array(input['creators'], 'creator'),
+        'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input['creators'], 'creator'))),
         'publicationYear': input.get('publicationYear')
     }
