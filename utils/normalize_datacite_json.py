@@ -1,11 +1,20 @@
+import sys
 
+def get_identifier(entry: dict, identifier_type: str):
+    if identifier := entry.get('identifier'):
+        if id_type := identifier.get('@identifierType'):
+            if id_type == identifier_type and '#text' in identifier:
+                return identifier['#text']
+
+    #print(f'No DOI given for {entry}')
+    return None
 
 def harmonize_creator(entry: dict):
     cr =  entry['creator']
 
     if isinstance(cr['creatorName'], str):
         return {
-            'creatorName': cr['creatorName']
+            'name': cr['creatorName']
         }
     else:
         return {
@@ -65,9 +74,16 @@ def make_array(field: dict | list | None, field_name: str):
 def normalize_datacite_json(input: dict):
     # print(json.dumps(input))
 
-    return {
-        'titles': list(map(lambda el: harmonize_props(el, 'title', {'@xml:lang': 'lang', '@titleType': 'titleType' }), make_array(input.get('titles'), 'title'))),
-        'subjects': list(map(lambda el: harmonize_props(el, 'subject', {'@xml:lang': 'lang'}), make_array(input.get('subjects'), 'subject'))),
-        'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input.get('creators'), 'creator'))),
-        'publicationYear': input.get('publicationYear')
-    }
+    try:
+        return {
+            'doi': get_identifier(input, 'DOI'),
+            'url': get_identifier(input, 'URL'),
+            'titles': list(map(lambda el: harmonize_props(el, 'title', {'@xml:lang': 'lang', '@titleType': 'titleType' }), make_array(input.get('titles'), 'title'))),
+            'subjects': list(map(lambda el: harmonize_props(el, 'subject', {'@xml:lang': 'lang'}), make_array(input.get('subjects'), 'subject'))),
+            'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input.get('creators'), 'creator'))),
+            'publicationYear': input.get('publicationYear'),
+            'descriptions': list(map(lambda el: harmonize_props(el, 'description', {'@descriptionType': 'descriptionType', '@xml:lang': 'lang'}), make_array(input.get('descriptions'), 'description')))
+        }
+
+    except Exception as e:
+        print(f'Error {str(e)} when processing {input}', file=sys.stderr)
