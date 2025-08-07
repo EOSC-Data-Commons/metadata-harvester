@@ -1,24 +1,28 @@
 import argparse
 import json
 import os
+from utils.normalize_datacite_json import normalize_datacite_json
 
 import xmltodict
 from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
-def transform_record(filepath: Path, output_dir: Path):
+def transform_record(filepath: Path, output_dir: Path, normalize: bool):
 
     with open(filepath) as f:
         converted = xmltodict.parse(f.read())
 
     with open(f'{output_dir}/{filepath.name}.json', 'w') as f2:
-        f2.write(json.dumps(converted))
-
+        if normalize:
+            f2.write(json.dumps(normalize_datacite_json(converted['record']['metadata']['resource'])))
+        else:
+            f2.write(json.dumps(converted['record']['metadata']['resource']))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', help='input directory', type=str)
     parser.add_argument('-o', help='output directory', type=str)
+    parser.add_argument('-n', help='If set, output JSON is normalized', action='store_true')
 
     args = parser.parse_args()
 
@@ -29,4 +33,4 @@ if __name__ == '__main__':
     files: list[Path] = (list(Path(args.i).rglob("*.xml")))
 
     with Pool(processes=cpu_count()) as p:
-        p.starmap(transform_record, map(lambda file: (file, args.o), files))
+        p.starmap(transform_record, map(lambda file: (file, args.o, args.n), files))

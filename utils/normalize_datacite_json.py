@@ -20,9 +20,10 @@ def harmonize_props(entry: dict, field_name: str, value_map: dict):
     if isinstance(entry[field_name], str):
         return entry
     elif isinstance(entry[field_name], dict):
-        harmonized_entry =  {
-            field_name: entry[field_name]['#text'],
-        }
+        harmonized_entry =  {}
+
+        if '#text' in entry[field_name]:
+            harmonized_entry[field_name] = entry[field_name]['#text']
 
         for k, v in value_map.items():
             if entry[field_name].get(k) is not None:
@@ -43,8 +44,11 @@ def make_object(entry: list | dict, field_name: str):
         return [{field_name: entry}]
 
 
-def make_array(field: dict | list, field_name: str):
+def make_array(field: dict | list | None, field_name: str):
     #print(field.items())
+
+    if field is None:
+        return []
 
     if isinstance(field, dict):
         # print('dict')
@@ -62,8 +66,8 @@ def normalize_datacite_json(input: dict):
     # print(json.dumps(input))
 
     return {
-        'titles': list(map(lambda el: harmonize_props(el, 'title', {'@xml:lang': 'lang', '@titleType': 'titleType' }), make_array(input['titles'], 'title'))),
-        'subjects': list(map(lambda el: harmonize_props(el, 'subject', {'@xml:lang': 'lang'}), make_array(input['subjects'], 'subject'))),
-        'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input['creators'], 'creator'))),
+        'titles': list(map(lambda el: harmonize_props(el, 'title', {'@xml:lang': 'lang', '@titleType': 'titleType' }), make_array(input.get('titles'), 'title'))),
+        'subjects': list(map(lambda el: harmonize_props(el, 'subject', {'@xml:lang': 'lang'}), make_array(input.get('subjects'), 'subject'))),
+        'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input.get('creators'), 'creator'))),
         'publicationYear': input.get('publicationYear')
     }
