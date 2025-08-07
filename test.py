@@ -9,5 +9,5 @@ with open('DABAR_json/oai_dabar.srce.hr_agr_3356.oai_datacite.xml.json') as f:
     two = normalize_datacite_json(json.load(f)['record']['metadata']['resource'])
 
 
-print(json.dumps([one, two]))
-#print(json.dumps(one))
+with open('res.json', 'w') as f:
+    f.write(json.dumps([one, two]))

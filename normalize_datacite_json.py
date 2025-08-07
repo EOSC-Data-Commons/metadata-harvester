@@ -1,7 +1,17 @@
 import json
 
+def harmonize_props(entry: dict, field_name: str):
+    #print(type(entry), field_name)
 
-def make_object(entry: list | object, field_name: str):
+    if isinstance(entry[field_name], str):
+        return entry
+    elif isinstance(entry[field_name], dict):
+        return {field_name: entry[field_name]['#text']}
+    else:
+        raise Exception('Neither string nor dict')
+
+
+def make_object(entry: list | dict, field_name: str):
     #print(entry)
     if isinstance(entry, list):
         res = list(map(lambda fi: {field_name: fi}, entry))
@@ -29,7 +39,7 @@ def normalize_datacite_json(input: dict):
     # print(json.dumps(input))
 
     return {
-        'titles': make_array(input['titles'], 'title'),
-        'subjects': make_array(input['subjects'], 'subject'),
+        'titles': list(map(lambda el: harmonize_props(el, 'title'), make_array(input['titles'], 'title'))),
+        'subjects': list(map(lambda el: harmonize_props(el, 'subject'), make_array(input['subjects'], 'subject'))),
         'creators': make_array(input['creators'], 'creator')
     }
