@@ -21,10 +21,38 @@ class TestNormalizeDatacite(unittest.TestCase):
                 'http://www.openarchives.org/OAI/2.0/:metadata']['http://datacite.org/schema/kernel-4:resource']
         res = normalize_datacite_json.make_array(data.get('http://datacite.org/schema/kernel-4:titles'), 'http://datacite.org/schema/kernel-4:title')
 
-        print(res)
+        #print(res)
         self.assertEqual(len(res), 2)
         self.assertTrue(res[0].get('http://datacite.org/schema/kernel-4:title'))
         self.assertTrue(res[1].get('http://datacite.org/schema/kernel-4:title'))
 
+    def test_harmonize_props_string(self):
+        data = {
+            'http://datacite.org/schema/kernel-4:title': 'A title'
+        }
 
+        res = normalize_datacite_json.harmonize_props(data, 'http://datacite.org/schema/kernel-4:title', {})
+
+        #print(res)
+
+        self.assertEqual(res, {
+            'title': 'A title'
+        })
+
+    def test_harmonize_props_object(self):
+        data = {
+            'http://datacite.org/schema/kernel-4:title': {
+                '#text': 'Another title',
+                '@titleType': 'alternative'
+            }
+        }
+
+        res = normalize_datacite_json.harmonize_props(data, 'http://datacite.org/schema/kernel-4:title', {'@titleType': 'titleType'})
+
+        #print(res)
+
+        self.assertEqual(res, {
+            'title': 'Another title',
+            'titleType': 'alternative'
+        })
 

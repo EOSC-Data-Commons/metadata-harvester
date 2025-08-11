@@ -28,14 +28,17 @@ def harmonize_creator(entry: dict):
 
 def harmonize_props(entry: dict, field_name: str, value_map: dict):
     #print(type(entry), field_name, entry)
+    name = field_name[len(DATACITE) + 1:]
 
     if isinstance(entry[field_name], str):
-        return entry
+        return {
+            name: entry[field_name]
+        }
     elif isinstance(entry[field_name], dict):
         harmonized_entry =  {}
 
         if '#text' in entry[field_name]:
-            harmonized_entry[field_name] = entry[field_name]['#text']
+            harmonized_entry[name] = entry[field_name]['#text']
 
         for k, v in value_map.items():
             if entry[field_name].get(k) is not None:
