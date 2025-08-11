@@ -9,3 +9,4 @@ last_harvest_*.txt
 testne_verzije_skripte/
 *json*/
 .idea/*
+*.pyc

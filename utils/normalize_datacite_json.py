@@ -13,17 +13,21 @@ def get_identifier(entry: dict, identifier_type: str):
     return None
 
 def harmonize_creator(entry: dict):
-    cr =  entry['creator']
+    '''
+    Given an entry of 'datacite_creators', harmonizes its structure.
 
-    if isinstance(cr['creatorName'], str):
-        return {
-            'name': cr['creatorName']
-        }
+    :param entry: Given entry from 'creators':
+    :return: A harmonized entry.
+    '''
+
+    cr = entry[f'{DATACITE}:creator']
+
+    if isinstance(cr[f'{DATACITE}:creatorName'], str):
+        #print(cr)
+        return {'creatorName': cr[f'{DATACITE}:creatorName']}
     else:
-        return {
-            **harmonize_props(cr, 'creatorName', {'@nameType': 'nameType'})
-        }
-
+        #print(cr)
+        return harmonize_props(cr, f'{DATACITE}:creatorName', {'@nameType': 'nameType'})
 
 
 def harmonize_props(entry: dict, field_name: str, value_map: dict):
@@ -98,9 +102,9 @@ def normalize_datacite_json(input: dict):
             'url': get_identifier(input, 'URL'),
             'titles': list(map(lambda el: harmonize_props(el, f'{DATACITE}:title', {f'@{XML}:lang': 'lang', '@titleType': 'titleType' }), make_array(input.get(f'{DATACITE}:titles'), f'{DATACITE}:title'))),
             'subjects': list(map(lambda el: harmonize_props(el, f'{DATACITE}:subject', {f'@{XML}:lang': 'lang'}), make_array(input.get(f'{DATACITE}:subjects'), f'{DATACITE}:subject'))),
-            #'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input.get('creators'), 'creator'))),
+            'creators': list(map(lambda cr: harmonize_creator(cr), make_array(input.get(f'{DATACITE}:creators'), f'{DATACITE}:creator'))),
             'publicationYear': input.get('http://datacite.org/schema/kernel-4:publicationYear'),
-            #'descriptions': list(map(lambda el: harmonize_props(el, 'description', {'@descriptionType': 'descriptionType', '@xml:lang': 'lang'}), make_array(input.get('descriptions'), 'description')))
+            'descriptions': list(map(lambda el: harmonize_props(el, f'{DATACITE}:description', {'@descriptionType': 'descriptionType', f'@{XML}:lang': 'lang'}), make_array(input.get(f'{DATACITE}:descriptions'), f'{DATACITE}:description')))
         }
 
     except Exception as e:

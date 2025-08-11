@@ -56,3 +56,24 @@ class TestNormalizeDatacite(unittest.TestCase):
             'titleType': 'alternative'
         })
 
+    def test_harmonize_creator_string(self):
+        data = {
+            'http://datacite.org/schema/kernel-4:creator':
+                {'http://datacite.org/schema/kernel-4:creatorName': 'Pe\u0161un, Luka'}
+        }
+
+        res = normalize_datacite_json.harmonize_creator(data)
+
+        self.assertEqual(res, {'creatorName': 'Pe\u0161un, Luka'})
+
+    def test_harmonize_creator_object(self):
+        data = {
+            'http://datacite.org/schema/kernel-4:creator':
+                {'http://datacite.org/schema/kernel-4:creatorName': {'#text': 'Pe\u0161un, Luka', '@nameType': 'personal'}}
+        }
+
+        res = normalize_datacite_json.harmonize_creator(data)
+
+        self.assertEqual(res, {'creatorName': 'Pe\u0161un, Luka', 'nameType': 'personal'})
+
+
