@@ -1,4 +1,4 @@
-import sys
+from typing import Any
 
 DATACITE = 'http://datacite.org/schema/kernel-4'
 XML = 'http://www.w3.org/XML/1998/namespace'
@@ -93,7 +93,7 @@ def make_array(field: dict | list | None, subfield_name: str):
         raise Exception('Neither dict nor list')
 
 
-def remove_empty_item(item: tuple[str, any]):
+def remove_empty_item(item: tuple[str, Any]):
     # only ignore None values and empty lists (do not rely on conversions to falsy/truthy)
     if isinstance(item[1], list):
         return len(item[1]) > 0

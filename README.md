@@ -46,9 +46,12 @@ Last harvest date is saved in last_harvest_{repository}.txt for the purpose of i
 
 This projects has the following dependencies:
 
-- [oaipmh-scythe](https://github.com/afuetterer/oaipmh-scythe): [BSD](https://github.com/afuetterer/oaipmh-scythe/blob/master/LICENSEBSD)
-- [lxml](https://github.com/lxml/lxml): [BSD](https://github.com/lxml/lxml/blob/master/LICENSE.txt)
-- [xmltodict](https://github.com/martinblech/xmltodict): [MIT](https://github.com/martinblech/xmltodict/blob/master/LICENSE)
-- [pytest](https://github.com/pytest-dev/pytest): [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE)
 - [jsonschema](https://github.com/python-jsonschema/jsonschema): [MIT](https://github.com/python-jsonschema/jsonschema/blob/main/COPYING)
+- [lxml](https://github.com/lxml/lxml): [BSD](https://github.com/lxml/lxml/blob/master/LICENSE.txt)
+- [oaipmh-scythe](https://github.com/afuetterer/oaipmh-scythe): [BSD](https://github.com/afuetterer/oaipmh-scythe/blob/master/LICENSEBSD)
+- [xmltodict](https://github.com/martinblech/xmltodict): [MIT](https://github.com/martinblech/xmltodict/blob/master/LICENSE)
 
+### Development Dependencies
+- [lxml-stubs](https://github.com/lxml/lxml-stubs): [Apache](https://github.com/lxml/lxml-stubs/blob/master/LICENSE)
+- [pytest](https://github.com/pytest-dev/pytest): [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE)
+- [typeshed](https://github.com/python/typeshed): [Apache](https://github.com/python/typeshed/blob/main/LICENSE)
