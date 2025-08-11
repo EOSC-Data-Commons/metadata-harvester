@@ -52,6 +52,7 @@ This projects has the following dependencies:
 - [xmltodict](https://github.com/martinblech/xmltodict): [MIT](https://github.com/martinblech/xmltodict/blob/master/LICENSE)
 
 ### Development Dependencies
+- [mypy](https://github.com/python/mypy): [MIT](https://github.com/python/mypy/blob/master/LICENSE)
 - [lxml-stubs](https://github.com/lxml/lxml-stubs): [Apache](https://github.com/lxml/lxml-stubs/blob/master/LICENSE)
 - [pytest](https://github.com/pytest-dev/pytest): [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE)
 - [typeshed](https://github.com/python/typeshed): [Apache](https://github.com/python/typeshed/blob/main/LICENSE)
