@@ -7,16 +7,27 @@ import xmltodict
 from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
-def transform_record(filepath: Path, output_dir: Path, normalize: bool):
 
+def transform_record(filepath: Path, output_dir: Path, normalize: bool):
     with open(filepath) as f:
-        converted = xmltodict.parse(f.read())
+        converted = xmltodict.parse(f.read(), process_namespaces=True)
 
     with open(f'{output_dir}/{filepath.name}.json', 'w') as f2:
         if normalize:
-            f2.write(json.dumps(normalize_datacite_json(converted['record']['metadata']['resource'])))
+
+            metadata = converted['http://www.openarchives.org/OAI/2.0/:record'][
+                'http://www.openarchives.org/OAI/2.0/:metadata']
+
+            if 'http://datacite.org/schema/kernel-4:resource' in metadata:
+                resource = metadata['http://datacite.org/schema/kernel-4:resource']
+            else:
+                # HAL
+                resource = metadata['http://www.openarchives.org/OAI/2.0/:resource']
+
+            f2.write(json.dumps(normalize_datacite_json(resource)))
         else:
-            f2.write(json.dumps(converted['record']['metadata']['resource']))
+            f2.write(json.dumps(converted))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
