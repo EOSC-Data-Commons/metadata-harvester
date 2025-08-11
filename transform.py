@@ -35,9 +35,9 @@ def transform_record(filepath: Path, output_dir: Path, normalize: bool, schema: 
             with open(f'{output_dir}/{filepath.name}.json', 'w') as f:
                 f.write(json.dumps(converted))
     except ValidationError as e:
-        print(f'Validation failed: {filepath}', file=sys.stderr)
+        print(f'Validation failed for {filepath}: {e.message}', file=sys.stderr)
     except Exception as e:
-        print(f'Transformation failed: {filepath}', file=sys.stderr)
+        print(f'Transformation failed for {filepath}: {e}', file=sys.stderr)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

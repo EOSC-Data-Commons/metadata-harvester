@@ -118,4 +118,5 @@ def normalize_datacite_json(input: dict):
         return dict(filter(remove_empty_item, res.items()))
 
     except Exception as e:
-        print(f'Error {str(e)} when processing {input}', file=sys.stderr)
+        #print(f'Error {str(e)} when processing {input}', file=sys.stderr)
+        raise e
