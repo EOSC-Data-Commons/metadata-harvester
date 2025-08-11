@@ -17,11 +17,25 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
+### Harvesting
+
 Run from the command line:
 ```sh
-python harvester-oaipmh.py {repository URL}
+python harvester-oaipmh.py repos_config/{config_file.json}
 ```
-Replace {repository URL} with the actual OAI-PMH endpoint of the repository you want to harvest from.
+
+### Transforming Harvested Data
+
+Harvested data can be transformed to JSON. 
+Currently, only `oai_datacite` metadata prefix is supported.  
+
+```sh
+python transform.py -i harvests_{repo_suffix} -o {repo_suffix}_json [-n]
+```
+
+If the -n flag is provided, the JSON data will also be normalized and validated against `schema.json`. 
+
 
 ## Output
 Harvested XML files are saved as initial_harvest_{date}.xml or harvest_{date}.xml in folders harvests_{repository}.
@@ -29,8 +43,12 @@ Harvested XML files are saved as initial_harvest_{date}.xml or harvest_{date}.xm
 Last harvest date is saved in last_harvest_{repository}.txt for the purpose of incremental harvesting.
 
 ## License
-This project uses the [oaipmh-scythe](https://github.com/afuetterer/oaipmh-scythe) Python client,  
-which is distributed under the BSD license.
 
-The BSD license is a permissive open source license that allows use, modification, and distribution.  
-For full license details, see the [oaipmh-scythe license](https://github.com/afuetterer/oaipmh-scythe/blob/master/LICENSE).
+This projects has the following dependencies:
+
+- [oaipmh-scythe](https://github.com/afuetterer/oaipmh-scythe): [BSD](https://github.com/afuetterer/oaipmh-scythe/blob/master/LICENSEBSD)
+- [lxml](https://github.com/lxml/lxml): [BSD](https://github.com/lxml/lxml/blob/master/LICENSE.txt)
+- [xmltodict](https://github.com/martinblech/xmltodict): [MIT](https://github.com/martinblech/xmltodict/blob/master/LICENSE)
+- [pytest](https://github.com/pytest-dev/pytest): [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE)
+- [jsonschema](https://github.com/python-jsonschema/jsonschema): [MIT](https://github.com/python-jsonschema/jsonschema/blob/main/COPYING)
+
