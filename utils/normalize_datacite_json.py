@@ -93,11 +93,18 @@ def make_array(field: dict | list | None, subfield_name: str):
         raise Exception('Neither dict nor list')
 
 
+def remove_empty_item(item: tuple[str, any]):
+    # only ignore None values and empty lists (do not rely on conversions to falsy/truthy)
+    if isinstance(item[1], list):
+        return len(item[1]) > 0
+    else:
+        return item[1] is not None
+
 def normalize_datacite_json(input: dict):
     # print(json.dumps(input))
 
     try:
-        return {
+        res =  {
             'doi': get_identifier(input, 'DOI'),
             'url': get_identifier(input, 'URL'),
             'titles': list(map(lambda el: harmonize_props(el, f'{DATACITE}:title', {f'@{XML}:lang': 'lang', '@titleType': 'titleType' }), make_array(input.get(f'{DATACITE}:titles'), f'{DATACITE}:title'))),
@@ -106,6 +113,9 @@ def normalize_datacite_json(input: dict):
             'publicationYear': input.get('http://datacite.org/schema/kernel-4:publicationYear'),
             'descriptions': list(map(lambda el: harmonize_props(el, f'{DATACITE}:description', {'@descriptionType': 'descriptionType', f'@{XML}:lang': 'lang'}), make_array(input.get(f'{DATACITE}:descriptions'), f'{DATACITE}:description')))
         }
+
+        # remove None values and empty lists
+        return dict(filter(remove_empty_item, res.items()))
 
     except Exception as e:
         print(f'Error {str(e)} when processing {input}', file=sys.stderr)
