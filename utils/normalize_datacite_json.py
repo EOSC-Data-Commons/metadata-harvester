@@ -22,16 +22,29 @@ def harmonize_creator(entry: dict):
 
     cr = entry[f'{DATACITE}:creator']
 
-    if isinstance(cr[f'{DATACITE}:creatorName'], str):
-        #print(cr)
-        return {'creatorName': cr[f'{DATACITE}:creatorName']}
-    else:
-        #print(cr)
-        return harmonize_props(cr, f'{DATACITE}:creatorName', {'@nameType': 'nameType'})
+    return {
+        **harmonize_props(cr, f'{DATACITE}:creatorName', {'@nameType': 'nameType'}),
+        **harmonize_props(cr, f'{DATACITE}:givenName', {}),
+        **harmonize_props(cr, f'{DATACITE}:familyName', {}),
+        **harmonize_props(cr, f'{DATACITE}:nameIdentifier', {'@nameIdentifierScheme': 'nameIdentifierScheme'})
+    }
 
 
-def harmonize_props(entry: dict, field_name: str, value_map: dict):
+def harmonize_props(entry: dict, field_name: str, attr_map: dict):
+    '''
+    Give a dict and a field_name, returns a dict with that field's value in a harmonized format.
+
+    :param entry: given dict.
+    :param field_name: name of the field to harmonize.
+    :param attr_map: key-value map or attribute names.
+    :return: the specified field of the given dict in a harmonized format.
+    '''
     #print(type(entry), field_name, entry)
+
+    # ignore non-existing fields
+    if field_name not in entry:
+        return {}
+
     name = field_name[len(DATACITE) + 1:]
 
     if isinstance(entry[field_name], str):
@@ -44,7 +57,7 @@ def harmonize_props(entry: dict, field_name: str, value_map: dict):
         if '#text' in entry[field_name]:
             harmonized_entry[name] = entry[field_name]['#text']
 
-        for k, v in value_map.items():
+        for k, v in attr_map.items():
             if entry[field_name].get(k) is not None:
                 harmonized_entry[v] = entry[field_name][k]
 
