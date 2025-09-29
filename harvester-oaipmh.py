@@ -7,6 +7,7 @@ from datetime import datetime
 from lxml import etree as ET
 import json
 from oaipmh_scythe import Scythe
+import requests
 
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
 
@@ -52,6 +53,23 @@ def save_record(record, metadata_prefix, harvests_folder):
 
     return True
 
+# additional metadata: fetch and save dataverse json
+def save_dataverse_json(doi, base_url, exporter, harvests_folder):
+    params = {"exporter": exporter, "persistentId": doi}
+    try:
+        response = requests.get(base_url, params=params, timeout=30)
+        if response.status_code == 200:
+            clean_id = clean_identifier(doi)
+            filename = f"{clean_id}.{exporter}.json"
+            filepath = os.path.join(harvests_folder, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(response.json(), f, indent=2)
+        else:
+            print(f"Failed to fetch Dataverse JSON for {doi}: {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching Dataverse JSON for {doi}: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
     parser.add_argument("config_file", help="Path to repository config JSON file")
@@ -65,6 +83,8 @@ def main():
     metadata_prefix = config.get("metadata_prefix", "oai_dc")
     last_harvest = config.get("last_harvest_date")
     set = config.get("set")
+    additional = config.get("additional_metadata")
+    additional_protocol = additional.get("protocol") if additional else None
 
     harvests_folder = f"harvests_{suffix}"
     os.makedirs(harvests_folder, exist_ok=True)
@@ -91,6 +111,15 @@ def main():
             for record in records:
                 if save_record(record, metadata_prefix, harvests_folder):
                     record_count += 1  
+
+                if additional_protocol == "dataverse_api":
+                        doi = record.header.identifier  # OAI identifier == persistentId
+                        save_dataverse_json(
+                            doi,
+                            additional["base_url"],
+                            additional["exporter"],
+                            harvests_folder
+                        )
 
             if record_count > 0:
                 today = datetime.today().strftime("%Y-%m-%d")
