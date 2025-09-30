@@ -4,5 +4,10 @@
     "repository_suffix": "DABAR",
     "last_harvest_date": "",
     "metadata_prefix": "oai_datacite",
-    "set": null
+    "set": null,
+    "additional_metadata": {
+      "protocol": "OAI-PMH",
+      "base_url": "https://dabar.srce.hr/oai",
+      "schema": "mods"
+    }
   }

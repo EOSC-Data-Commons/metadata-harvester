@@ -4,5 +4,10 @@
   "repository_suffix": "DANS_phystech",
   "last_harvest_date": "",
   "metadata_prefix": "oai_datacite",
-  "set": null
+  "set": null,
+  "additional_metadata": {
+    "protocol": "dataverse_api",
+    "base_url": "https://phys-techsciences.datastations.nl/api/datasets/export",
+    "exporter": "dataverse_json"
+  }
 }
