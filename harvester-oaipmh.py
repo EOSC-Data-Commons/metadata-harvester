@@ -69,6 +69,18 @@ def save_dataverse_json(doi, base_url, exporter, harvests_folder):
     except Exception as e:
         print(f"Error fetching Dataverse JSON for {doi}: {e}")
 
+# additional metadata: fetch and save additional schema
+def save_additional_oai(record_id, repo_url, metadata_prefix, harvests_folder):
+    try:
+        with Scythe(repo_url) as client:
+            record = client.get_record(identifier=record_id, metadata_prefix=metadata_prefix)
+            clean_id = clean_identifier(record_id)
+            filename = f"{clean_id}.{metadata_prefix}.xml"
+            filepath = os.path.join(harvests_folder, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+    except Exception as e:
+        print(f"Error fetching {metadata_prefix} metadata for {record_id}: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
@@ -119,6 +131,15 @@ def main():
                             additional["base_url"],
                             additional["exporter"],
                             harvests_folder
+                        )
+
+                if additional_protocol == "OAI-PMH":
+                        identifier = record.header.identifier
+                        save_additional_oai(
+                            record_id=identifier,
+                            repo_url=additional["base_url"],
+                            metadata_prefix=additional["schema"],
+                            harvests_folder=harvests_folder
                         )
 
             if record_count > 0:
