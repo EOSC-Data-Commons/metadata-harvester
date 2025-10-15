@@ -1,5 +1,5 @@
 # script for harvesting metadata based on oaipmh-scythe client
-# run in terminal with the repository URL as argument: python harvester_scheduled.py {repo URL}
+# run in terminal with the path to config file as argument: python harvester_scheduled.py {repos_config/repo.json}
 
 import os
 import argparse
@@ -7,6 +7,8 @@ from datetime import datetime
 from lxml import etree as ET
 import json
 from oaipmh_scythe import Scythe
+import requests
+import traceback
 
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
 
@@ -52,6 +54,35 @@ def save_record(record, metadata_prefix, harvests_folder):
 
     return True
 
+# additional metadata: fetch and save dataverse json
+def save_dataverse_json(doi, base_url, exporter, harvests_folder):
+    params = {"exporter": exporter, "persistentId": doi}
+    try:
+        response = requests.get(base_url, params=params, timeout=30)
+        if response.status_code == 200:
+            clean_id = clean_identifier(doi)
+            filename = f"{clean_id}.{exporter}.json"
+            filepath = os.path.join(harvests_folder, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(response.json(), f, indent=2)
+        else:
+            print(f"Failed to fetch Dataverse JSON for {doi}: {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching Dataverse JSON for {doi}: {e}")
+
+# additional metadata: fetch and save additional schema
+def save_additional_oai(record_id, repo_url, metadata_prefix, harvests_folder):
+    try:
+        with Scythe(repo_url) as client:
+            record = client.get_record(identifier=record_id, metadata_prefix=metadata_prefix)
+            clean_id = clean_identifier(record_id)
+            filename = f"{clean_id}.{metadata_prefix}.xml"
+            filepath = os.path.join(harvests_folder, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+    except Exception as e:
+        print(f"Error fetching {metadata_prefix} metadata for {record_id}: {e}")
+
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
     parser.add_argument("config_file", help="Path to repository config JSON file")
@@ -65,9 +96,13 @@ def main():
     metadata_prefix = config.get("metadata_prefix", "oai_dc")
     last_harvest = config.get("last_harvest_date")
     set = config.get("set")
+    additional = config.get("additional_metadata")
+    additional_protocol = additional.get("protocol") if additional else None
 
     harvests_folder = f"harvests_{suffix}"
+    additional_folder = f"harvests_{suffix}_additional"
     os.makedirs(harvests_folder, exist_ok=True)
+    os.makedirs(additional_folder, exist_ok=True)
 
     try:
         with Scythe(repo_url) as client:
@@ -75,6 +110,7 @@ def main():
                 print(f"Incremental harvest since {last_harvest}")
                 records = client.list_records(
                     from_=last_harvest,
+                    until="2025-08-21",
                     metadata_prefix=metadata_prefix,
                     set_=set
                 )
@@ -92,6 +128,24 @@ def main():
                 if save_record(record, metadata_prefix, harvests_folder):
                     record_count += 1  
 
+                if additional_protocol == "dataverse_api":
+                        doi = record.header.identifier  # OAI identifier == persistentId
+                        save_dataverse_json(
+                            doi,
+                            additional["base_url"],
+                            additional["exporter"],
+                            additional_folder
+                        )
+
+                if additional_protocol == "OAI-PMH":
+                        identifier = record.header.identifier
+                        save_additional_oai(
+                            record_id=identifier,
+                            repo_url=additional["base_url"],
+                            metadata_prefix=additional["schema"],
+                            harvests_folder=additional_folder
+                        )
+
             if record_count > 0:
                 today = datetime.today().strftime("%Y-%m-%d")
                 config["last_harvest_date"] = today
@@ -102,6 +156,7 @@ def main():
 
     except Exception as e:
         print(f"An error occurred during harvesting: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
