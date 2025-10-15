@@ -1,5 +1,5 @@
 # script for harvesting metadata based on oaipmh-scythe client
-# run in terminal with the repository URL as argument: python harvester_scheduled.py {repo URL}
+# run in terminal with the path to config file as argument: python harvester_scheduled.py {repos_config/repo.json}
 
 import os
 import argparse
@@ -8,6 +8,7 @@ from lxml import etree as ET
 import json
 from oaipmh_scythe import Scythe
 import requests
+import traceback
 
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
 
@@ -99,7 +100,9 @@ def main():
     additional_protocol = additional.get("protocol") if additional else None
 
     harvests_folder = f"harvests_{suffix}"
+    additional_folder = f"harvests_{suffix}_additional"
     os.makedirs(harvests_folder, exist_ok=True)
+    os.makedirs(additional_folder, exist_ok=True)
 
     try:
         with Scythe(repo_url) as client:
@@ -107,6 +110,7 @@ def main():
                 print(f"Incremental harvest since {last_harvest}")
                 records = client.list_records(
                     from_=last_harvest,
+                    until="2025-08-21",
                     metadata_prefix=metadata_prefix,
                     set_=set
                 )
@@ -130,7 +134,7 @@ def main():
                             doi,
                             additional["base_url"],
                             additional["exporter"],
-                            harvests_folder
+                            additional_folder
                         )
 
                 if additional_protocol == "OAI-PMH":
@@ -139,7 +143,7 @@ def main():
                             record_id=identifier,
                             repo_url=additional["base_url"],
                             metadata_prefix=additional["schema"],
-                            harvests_folder=harvests_folder
+                            harvests_folder=additional_folder
                         )
 
             if record_count > 0:
@@ -152,6 +156,7 @@ def main():
 
     except Exception as e:
         print(f"An error occurred during harvesting: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
