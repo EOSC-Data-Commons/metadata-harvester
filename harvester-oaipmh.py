@@ -11,11 +11,25 @@ import requests
 import traceback
 
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
+API_BASE_URL = ""
 
-# load json with config data for the repository
-def load_repo_config(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def load_repo_config(harvest_run_id: str):
+    """
+    Fetch repository configuration from API.
+
+    :param harvest_run_id: unique ID for that harvest run
+    :return: json file with config data
+    """
+    url = f"{API_BASE_URL}/config/{harvest_run_id}"
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        config = response.json()
+        return config
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch repository configuration from API: {e}")
+        raise
+
 
 # save new config data (i.e. update last harvest date)
 def save_repo_config(path, data):
@@ -84,18 +98,18 @@ def save_additional_oai(record_id, repo_url, metadata_prefix, harvests_folder):
         print(f"Error fetching {metadata_prefix} metadata for {record_id}: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
-    parser.add_argument("config_file", help="Path to repository config JSON file")
+    parser = argparse.ArgumentParser(description="OAI-PMH Harvester (with the possibility of harvesting additional metadata)")
+    parser.add_argument("harvest_run_id", help="Identifier of this harvest run")
     args = parser.parse_args()
 
-    config_path = args.config_file
-    config = load_repo_config(config_path)
+    harvest_run_id = args.harvest_run_id
+    config = load_repo_config(harvest_run_id)
 
-    repo_url = config["repository_url"]
-    suffix = config["repository_suffix"]
-    metadata_prefix = config.get("metadata_prefix", "oai_dc")
+    harvest_url = config["harvest_url"]
+    suffix = config["suffix"]
+    metadata_prefix = config["harvest_params"].get("metadata_prefix", "oai_dc")
     last_harvest = config.get("last_harvest_date")
-    set = config.get("set")
+    set = config["harvest_params"].get("set")
     additional = config.get("additional_metadata")
     additional_protocol = additional.get("protocol") if additional else None
 
@@ -105,7 +119,7 @@ def main():
     os.makedirs(additional_folder, exist_ok=True)
 
     try:
-        with Scythe(repo_url) as client:
+        with Scythe(harvest_url) as client:
             if last_harvest:
                 print(f"Incremental harvest since {last_harvest}")
                 records = client.list_records(
