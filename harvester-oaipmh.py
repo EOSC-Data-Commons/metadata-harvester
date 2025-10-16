@@ -2,6 +2,7 @@
 # run in terminal with the path to config file as argument: python harvester_scheduled.py {repos_config/repo.json}
 
 import os
+import sys
 import argparse
 from datetime import datetime
 from lxml import etree as ET
@@ -105,6 +106,14 @@ def main():
     harvest_run_id = args.harvest_run_id
     config = load_repo_config(harvest_run_id)
 
+    # this is an OAI-PMH harvester, exit if it's triggered by a repo with a different primary harvesting protocol
+    if config.get("protocol") != "OAI-PMH":
+        msg = (
+            f"Repository '{config["name"]}' skipped: protocol '{config.get("protocol")}' is not supported by this harvester."
+        )
+        print(msg)
+        sys.exit(0)
+
     harvest_url = config["harvest_url"]
     suffix = config["suffix"]
     metadata_prefix = config["harvest_params"].get("metadata_prefix", "oai_dc")
@@ -124,7 +133,6 @@ def main():
                 print(f"Incremental harvest since {last_harvest}")
                 records = client.list_records(
                     from_=last_harvest,
-                    until="2025-08-21",
                     metadata_prefix=metadata_prefix,
                     set_=set
                 )
