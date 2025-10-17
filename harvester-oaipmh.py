@@ -2,6 +2,7 @@
 # run in terminal with the path to config file as argument: python harvester_scheduled.py {repos_config/repo.json}
 
 import os
+import sys
 import argparse
 from datetime import datetime
 from lxml import etree as ET
@@ -11,106 +12,135 @@ import requests
 import traceback
 
 NS = {"oai": "http://www.openarchives.org/OAI/2.0/"}
+API_BASE_URL = ""
 
-# load json with config data for the repository
-def load_repo_config(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def load_repo_config(harvest_run_id: str):
+    """
+    Fetch repository configuration from API.
 
-# save new config data (i.e. update last harvest date)
-def save_repo_config(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    :param harvest_run_id: unique ID for that harvest run
+    :return: json file with config data
+    """
+    url = f"{API_BASE_URL}/config/{harvest_run_id}"
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        config = response.json()
+        return config
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch repository configuration from API: {e}")
+        raise
 
-# clean up OAI identifier for use in file names
-def clean_identifier(oai_identifier):
-    # replace problematic characters
-    return oai_identifier.replace("/", "_").replace("\\", "_").replace(":", "_")
 
-# save record if it's the latest version
-def save_record(record, metadata_prefix, harvests_folder):
-    identifier = record.header.identifier
-    clean_id = clean_identifier(identifier)
-    filename = f"{clean_id}.{metadata_prefix}.xml"
-    filepath = os.path.join(harvests_folder, filename)
+# save new config data (i.e. update last harvest date) ??
 
-    # check if file already exists
-    if os.path.exists(filepath):
-        try:
-            # parse existing file to get its datestamp
-            existing_tree = ET.parse(filepath)
-            existing_root = existing_tree.getroot()
-            existing_datestamp = existing_root.findtext(".//oai:datestamp", namespaces=NS)
+# clean up OAI identifier for use in file names ??
 
-            if existing_datestamp and existing_datestamp >= record.header.datestamp:
-                # existing file is newer - skip this record
-                return False
-        except Exception as e:
-            print(f"Warning: could not compare with existing record '{filename}', overwriting file: {e}")
+def send_harvest_event(
+    api_base_url,
+    repo_code,
+    harvest_url,
+    record_identifier,
+    datestamp,
+    is_deleted,
+    raw_metadata,
+    additional_metadata
+):
+    """
+    Create an API payload and send it.
 
-    # if the record is new(er), save it
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+    :return logical: True if the payload has been sent to API successfully 
+    """
+    url = f"{api_base_url}/harvest_event"
+    payload = {
+        "record_identifier": record_identifier,
+        "datestamp": datestamp,
+        "is_deleted": is_deleted,
+        "raw_metadata": raw_metadata,
+        "additional_metadata": additional_metadata,
+        "harvest_url": harvest_url,
+        "repo_code": repo_code
+    }
 
-    return True
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to send record {record_identifier} to API: {e}")
+        return False
 
-# additional metadata: fetch and save dataverse json
-def save_dataverse_json(doi, base_url, exporter, harvests_folder):
+
+def fetch_dataverse_json(doi, base_url, exporter):
+    """
+    Fetch additional metadata: dataverse json
+
+    :param doi: record identifier
+    :param base_url: dataverse API endpoint
+    :param exporter: metadata format
+
+    :return: json with additional metadata
+    """
     params = {"exporter": exporter, "persistentId": doi}
     try:
         response = requests.get(base_url, params=params, timeout=30)
         if response.status_code == 200:
-            clean_id = clean_identifier(doi)
-            filename = f"{clean_id}.{exporter}.json"
-            filepath = os.path.join(harvests_folder, filename)
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(response.json(), f, indent=2)
+            return json.dumps(response.json(), indent=2)
         else:
             print(f"Failed to fetch Dataverse JSON for {doi}: {response.status_code}")
     except Exception as e:
         print(f"Error fetching Dataverse JSON for {doi}: {e}")
 
 # additional metadata: fetch and save additional schema
-def save_additional_oai(record_id, repo_url, metadata_prefix, harvests_folder):
+def fetch_additional_oai(record_id, base_url, metadata_prefix):
+    """
+    Fetch additional metadata: OAI-PMH
+
+    :param record_id: OAI-PMH record identifier
+    :param base_url: OAI-PMH endpoint
+    :param metadata_prefix: metadata format
+
+    :return: stringified xml with additional metadata
+    """
     try:
-        with Scythe(repo_url) as client:
+        with Scythe(base_url) as client:
             record = client.get_record(identifier=record_id, metadata_prefix=metadata_prefix)
-            clean_id = clean_identifier(record_id)
-            filename = f"{clean_id}.{metadata_prefix}.xml"
-            filepath = os.path.join(harvests_folder, filename)
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+            return ET.tostring(record.xml, pretty_print=True, encoding="unicode")
     except Exception as e:
         print(f"Error fetching {metadata_prefix} metadata for {record_id}: {e}")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="OAI-PMH Harvester")
-    parser.add_argument("config_file", help="Path to repository config JSON file")
+    parser = argparse.ArgumentParser(description="OAI-PMH Harvester (with the possibility of harvesting additional metadata)")
+    parser.add_argument("harvest_run_id", help="Identifier of this harvest run")
     args = parser.parse_args()
 
-    config_path = args.config_file
-    config = load_repo_config(config_path)
+    harvest_run_id = args.harvest_run_id
+    config = load_repo_config(harvest_run_id)
 
-    repo_url = config["repository_url"]
-    suffix = config["repository_suffix"]
-    metadata_prefix = config.get("metadata_prefix", "oai_dc")
+    # this is an OAI-PMH harvester, exit if it's triggered by a repo with a different primary harvesting protocol
+    if config.get("protocol") != "OAI-PMH":
+        msg = (
+            f"Repository '{config["name"]}' skipped: protocol '{config.get("protocol")}' is not supported by this harvester."
+        )
+        print(msg)
+        sys.exit(0)
+
+    harvest_url = config["harvest_url"]
+    suffix = config["suffix"]
+    metadata_prefix = config["harvest_params"].get("metadata_prefix", "oai_dc")
     last_harvest = config.get("last_harvest_date")
-    set = config.get("set")
+    set = config["harvest_params"].get("set")
     additional = config.get("additional_metadata")
     additional_protocol = additional.get("protocol") if additional else None
 
-    harvests_folder = f"harvests_{suffix}"
-    additional_folder = f"harvests_{suffix}_additional"
-    os.makedirs(harvests_folder, exist_ok=True)
-    os.makedirs(additional_folder, exist_ok=True)
 
     try:
-        with Scythe(repo_url) as client:
+        with Scythe(harvest_url) as client:
             if last_harvest:
                 print(f"Incremental harvest since {last_harvest}")
                 records = client.list_records(
                     from_=last_harvest,
-                    until="2025-08-21",
                     metadata_prefix=metadata_prefix,
                     set_=set
                 )
@@ -123,34 +153,46 @@ def main():
                 )
 
             record_count = 0
+            harvest_events = 0
 
             for record in records:
-                if save_record(record, metadata_prefix, harvests_folder):
-                    record_count += 1  
+                record_count += 1
+                identifier = record.header.identifier
+                datestamp = record.header.datestamp
+                is_deleted = getattr(record.header, "status", None) == "deleted"
+                raw_metadata = ET.tostring(record.xml, pretty_print=True, encoding="unicode")
+
+                additional_metadata = None
 
                 if additional_protocol == "dataverse_api":
-                        doi = record.header.identifier  # OAI identifier == persistentId
-                        save_dataverse_json(
-                            doi,
-                            additional["base_url"],
-                            additional["exporter"],
-                            additional_folder
-                        )
+                    additional_metadata = fetch_dataverse_json(
+                        doi=identifier,
+                        base_url=additional["endpoint"],
+                        exporter=additional["method"]
+                    )
 
-                if additional_protocol == "OAI-PMH":
-                        identifier = record.header.identifier
-                        save_additional_oai(
-                            record_id=identifier,
-                            repo_url=additional["base_url"],
-                            metadata_prefix=additional["schema"],
-                            harvests_folder=additional_folder
-                        )
+                elif additional_protocol == "OAI-PMH":
+                    additional_metadata = fetch_additional_oai(
+                        record_id=identifier,
+                        base_url=additional["endpoint"],
+                        metadata_prefix=additional["method"]
+                    )
+
+                if send_harvest_event(
+                    api_base_url=API_BASE_URL,
+                    repo_code=suffix,
+                    harvest_url=harvest_url,
+                    record_identifier=identifier,
+                    datestamp=datestamp,
+                    is_deleted=is_deleted,
+                    raw_metadata=raw_metadata,
+                    additional_metadata=additional_metadata,
+                ):
+                    harvest_events += 1
 
             if record_count > 0:
                 today = datetime.today().strftime("%Y-%m-%d")
-                config["last_harvest_date"] = today
-                save_repo_config(config_path, config)
-                print(f"Harvested {record_count} records. Saved to: {harvests_folder}")
+                print(f"Harvested {record_count} records. Successfully sent {harvest_events} of them to the warehouse.")
             else:
                 print("No new records harvested.")
 
