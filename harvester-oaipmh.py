@@ -32,15 +32,40 @@ def load_repo_config(harvest_run_id: str):
         raise
 
 
-# save new config data (i.e. update last harvest date)
-def save_repo_config(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+# save new config data (i.e. update last harvest date) ??
 
-# clean up OAI identifier for use in file names
-def clean_identifier(oai_identifier):
-    # replace problematic characters
-    return oai_identifier.replace("/", "_").replace("\\", "_").replace(":", "_")
+# clean up OAI identifier for use in file names ??
+
+def send_harvest_event(
+    api_base_url,
+    repo_code,
+    harvest_url,
+    record_identifier,
+    datestamp,
+    is_deleted,
+    raw_metadata,
+    additional_metadata
+):
+    """
+    Create an API payload and send it
+    """
+    url = f"{api_base_url}/harvest_event"
+    payload = {
+        "record_identifier": record_identifier,
+        "datestamp": datestamp,
+        "is_deleted": is_deleted,
+        "raw_metadata": raw_metadata,
+        "additional_metadata": additional_metadata,
+        "harvest_url": harvest_url,
+        "repo_code": repo_code
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to send record {record_identifier} to API: {e}")
+        
 
 # save record if it's the latest version
 def save_record(record, metadata_prefix, harvests_folder):
@@ -90,7 +115,7 @@ def save_additional_oai(record_id, repo_url, metadata_prefix, harvests_folder):
     try:
         with Scythe(repo_url) as client:
             record = client.get_record(identifier=record_id, metadata_prefix=metadata_prefix)
-            clean_id = clean_identifier(record_id)
+            clean_id = clean_identifier(record_id) 
             filename = f"{clean_id}.{metadata_prefix}.xml"
             filepath = os.path.join(harvests_folder, filename)
             with open(filepath, "w", encoding="utf-8") as f:
