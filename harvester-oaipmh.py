@@ -65,7 +65,7 @@ def send_harvest_event(
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Failed to send record {record_identifier} to API: {e}")
-        
+
 
 # save record if it's the latest version
 def save_record(record, metadata_prefix, harvests_folder):
@@ -94,34 +94,45 @@ def save_record(record, metadata_prefix, harvests_folder):
 
     return True
 
-# additional metadata: fetch and save dataverse json
-def save_dataverse_json(doi, base_url, exporter, harvests_folder):
+
+def fetch_dataverse_json(doi, base_url, exporter):
+    """
+    Fetch additional metadata: dataverse json
+
+    :param doi: record identifier
+    :param base_url: dataverse API endpoint
+    :param exporter: metadata format
+
+    :return: json with additional metadata
+    """
     params = {"exporter": exporter, "persistentId": doi}
     try:
         response = requests.get(base_url, params=params, timeout=30)
         if response.status_code == 200:
-            clean_id = clean_identifier(doi)
-            filename = f"{clean_id}.{exporter}.json"
-            filepath = os.path.join(harvests_folder, filename)
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(response.json(), f, indent=2)
+            return response.json()
         else:
             print(f"Failed to fetch Dataverse JSON for {doi}: {response.status_code}")
     except Exception as e:
         print(f"Error fetching Dataverse JSON for {doi}: {e}")
 
 # additional metadata: fetch and save additional schema
-def save_additional_oai(record_id, repo_url, metadata_prefix, harvests_folder):
+def fetch_additional_oai(record_id, base_url, metadata_prefix):
+    """
+    Fetch additional metadata: OAI-PMH
+
+    :param record_id: OAI-PMH record identifier
+    :param base_url: OAI-PMH endpoint
+    :param metadata_prefix: metadata format
+
+    :return: stringified xml with additional metadata
+    """
     try:
-        with Scythe(repo_url) as client:
+        with Scythe(base_url) as client:
             record = client.get_record(identifier=record_id, metadata_prefix=metadata_prefix)
-            clean_id = clean_identifier(record_id) 
-            filename = f"{clean_id}.{metadata_prefix}.xml"
-            filepath = os.path.join(harvests_folder, filename)
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(ET.tostring(record.xml, pretty_print=True, encoding="unicode"))
+            return ET.tostring(record.xml, pretty_print=True, encoding="unicode")
     except Exception as e:
         print(f"Error fetching {metadata_prefix} metadata for {record_id}: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="OAI-PMH Harvester (with the possibility of harvesting additional metadata)")
