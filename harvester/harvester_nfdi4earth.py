@@ -457,6 +457,7 @@ async def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
 
 
 
+DATASET_IRI_PREFIX = "https://cordra.knowledgehub.nfdi4earth.de/objects/"
 async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]:
     """
     Convert an NFDI4Earth KnowledgeHub dataset record into a DataCite 4.6
@@ -486,7 +487,7 @@ async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]
         raise ValueError("SPARQL record is missing dataset IRI")
 
     doi = extract_doi(landingpage)
-    record_identifier = dataset_id or ""
+    record_identifier = dataset_id.removeprefix(DATASET_IRI_PREFIX)
 
     ET.register_namespace("", "http://www.openarchives.org/OAI/2.0/")
     ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
@@ -649,7 +650,9 @@ async def process_dataset(
         logger.exception("Failed to build metadata for dataset %s", dataset_iri)
         return "failed"
 
-    record_identifier = binding_value(detail_record, "dataset") or dataset_iri
+    record_identifier = (
+        binding_value(detail_record, "dataset") or dataset_iri
+    ).removeprefix(DATASET_IRI_PREFIX)
 
     event_payload = {
         "record_identifier": record_identifier,
