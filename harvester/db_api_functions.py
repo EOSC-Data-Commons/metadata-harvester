@@ -1,30 +1,37 @@
 import httpx
 import logging
 from typing import Optional, Any
-from harvester.settings import settings
+from harvester.settings import current_settings
 
 logger = logging.getLogger(__name__)
 
-timeout = settings.WAREHOUSE_API_TIMEOUT
-base_url = settings.WAREHOUSE_API_URL
-# warehouse API routes:
-HARVEST_RUN_URL = f"{base_url}/harvest_run"
-HARVEST_EVENT_URL = f"{base_url}/harvest_event"
+# shared HTTP client, created on first use so that settings overrides are taken into account
+_WAREHOUSE_CLIENT: Optional[httpx.Client] = None
 
-# shared HTTP client for warehouse API
-_WAREHOUSE_CLIENT = httpx.Client(timeout=timeout)
+
+def _client() -> httpx.Client:
+    """Return the shared warehouse HTTP client, creating it if needed."""
+    global _WAREHOUSE_CLIENT
+    if _WAREHOUSE_CLIENT is None:
+        _WAREHOUSE_CLIENT = httpx.Client(timeout=current_settings().WAREHOUSE_API_TIMEOUT)
+    return _WAREHOUSE_CLIENT
+
+
+def _warehouse_url(route: str) -> str:
+    """Build a warehouse API route URL from the configured base URL."""
+    return f"{current_settings().WAREHOUSE_API_URL}/{route}"
 
 
 def start_harvest_run(harvest_url: str) -> Optional[dict[str, Any]]:
     """
-    POST /harvest_run to create a new harvest run. 
-    
+    POST /harvest_run to create a new harvest run.
+
     :param harvest_url: endpoint for harvesting
     :return: JSON response (dict) containing 'harvest_run_id', optionally 'last_harvest_date', and endpoint config; returns None on error.
     """
     payload = {"harvest_url": harvest_url}
     try:
-        response = _WAREHOUSE_CLIENT.post(HARVEST_RUN_URL, json=payload)
+        response = _client().post(_warehouse_url("harvest_run"), json=payload)
         response.raise_for_status()
         run_info: dict[str, Any] = response.json()
         logger.info("Started harvest run id=%s.", run_info.get("id"))
@@ -42,7 +49,7 @@ def get_open_run_id(harvest_url: str) -> Optional[str]:
     """
     params = {"harvest_url": harvest_url}
     try:
-        response = _WAREHOUSE_CLIENT.get(HARVEST_RUN_URL, params=params)
+        response = _client().get(_warehouse_url("harvest_run"), params=params)
         response.raise_for_status()
 
         response_json: dict[str, Any] = response.json()
@@ -66,7 +73,7 @@ def get_open_run_id(harvest_url: str) -> Optional[str]:
     except httpx.RequestError as e:
         logger.error("Network error while checking open harvest run for %s: %s", harvest_url, e)
         return None
-    
+
 
 def close_harvest_run(payload: dict[str, Any]) -> None:
     """
@@ -76,7 +83,7 @@ def close_harvest_run(payload: dict[str, Any]) -> None:
     """
     run_id = payload.get("id")
     try:
-        response = _WAREHOUSE_CLIENT.put(HARVEST_RUN_URL, json=payload)
+        response = _client().put(_warehouse_url("harvest_run"), json=payload)
         response.raise_for_status()
         logger.info(
             "Closed harvest run %s — started %s, finished %s",
@@ -93,10 +100,10 @@ def send_harvest_event(event_payload: dict[str, Any]) -> bool:
     Send event_payload to API.
 
     :param event_payload: dictionary containing event data for harvest_event route
-    :return logical: True if the payload has been sent to API successfully 
+    :return logical: True if the payload has been sent to API successfully
     """
     try:
-        response = _WAREHOUSE_CLIENT.post(HARVEST_EVENT_URL, json=event_payload)
+        response = _client().post(_warehouse_url("harvest_event"), json=event_payload)
         response.raise_for_status()
         return True
     except httpx.HTTPStatusError as e:
@@ -108,8 +115,12 @@ def send_harvest_event(event_payload: dict[str, Any]) -> bool:
 
 
 def close_warehouse_client() -> None:
+    global _WAREHOUSE_CLIENT
+    if _WAREHOUSE_CLIENT is None:
+        return
     try:
         _WAREHOUSE_CLIENT.close()
     except Exception:
         logger.warning("Failed to close warehouse client")
-        pass
+    finally:
+        _WAREHOUSE_CLIENT = None

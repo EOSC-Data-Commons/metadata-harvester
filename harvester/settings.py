@@ -6,7 +6,7 @@ import os
 Environment = Literal["production", "staging", "dev", "local"]
 
 
-class BaseAppSettings(BaseSettings):
+class HarvesterSettings(BaseSettings):
     ENVIRONMENT: Environment = "dev"
     WAREHOUSE_API_URL: AnyHttpUrl
 
@@ -18,25 +18,27 @@ class BaseAppSettings(BaseSettings):
         env_file = ".env"
         case_sensitive = True
         url_preserve_empty_path = True
+        # tolerate unrelated keys in a host project's .env when used as a library
+        extra = "ignore"
 
-class ProductionSettings(BaseAppSettings):
+class ProductionSettings(HarvesterSettings):
     """Production settings"""
     pass
 
 
-class StagingSettings(BaseAppSettings):
+class StagingSettings(HarvesterSettings):
     WAREHOUSE_API_URL: AnyHttpUrl = "http://192.168.10.6:8080" # type: ignore[assignment]
 
 
-class DevSettings(BaseAppSettings):
+class DevSettings(HarvesterSettings):
     WAREHOUSE_API_URL: AnyHttpUrl = "http://localhost:8080" # type: ignore[assignment]
 
 
-class LocalSettings(BaseAppSettings):
+class LocalSettings(HarvesterSettings):
     pass # set in .env
 
 
-def get_settings() -> BaseAppSettings:
+def get_settings() -> HarvesterSettings:
     env: Environment = os.getenv("ENVIRONMENT", "dev") # type: ignore[assignment]
 
     if env == "production":
@@ -49,4 +51,28 @@ def get_settings() -> BaseAppSettings:
         return DevSettings()
 
 
-settings = get_settings()
+# settings in use, read through current_settings() so it can be swapped per run
+_current_settings: HarvesterSettings | None = None
+
+
+def current_settings() -> HarvesterSettings:
+    """
+    Return the settings currently in use, falling back to the environment
+    profile (ENVIRONMENT / .env / defaults) on first access.
+    """
+    global _current_settings
+    if _current_settings is None:
+        _current_settings = get_settings()
+    return _current_settings
+
+
+def set_settings(new_settings: HarvesterSettings | None) -> HarvesterSettings:
+    """
+    Install the settings used by all harvester modules.
+
+    :param new_settings: settings to use, or None to fall back to the environment profile
+    :return: the settings now in use
+    """
+    global _current_settings
+    _current_settings = new_settings
+    return current_settings()
