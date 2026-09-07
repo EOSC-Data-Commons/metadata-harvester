@@ -18,8 +18,8 @@ def _client() -> httpx.Client:
 
 
 def _warehouse_url(route: str) -> str:
-    """Build a warehouse API route URL from the configured base URL."""
-    return f"{current_settings().WAREHOUSE_API_URL}/{route}"
+    """Build a warehouse API route URL, tolerating a trailing slash on the base URL."""
+    return f"{current_settings().WAREHOUSE_API_URL.rstrip('/')}/{route}"
 
 
 def start_harvest_run(harvest_url: str) -> Optional[dict[str, Any]]:

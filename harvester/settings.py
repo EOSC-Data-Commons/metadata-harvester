@@ -1,6 +1,5 @@
 from typing import Literal
 from pydantic_settings import BaseSettings
-from pydantic import AnyHttpUrl
 import os
 
 Environment = Literal["production", "staging", "dev", "local"]
@@ -8,7 +7,7 @@ Environment = Literal["production", "staging", "dev", "local"]
 
 class HarvesterSettings(BaseSettings):
     ENVIRONMENT: Environment = "dev"
-    WAREHOUSE_API_URL: AnyHttpUrl
+    WAREHOUSE_API_URL: str
 
     LOG_DIR: str = "./logs"
     LOG_LEVEL: str = "INFO"
@@ -17,7 +16,6 @@ class HarvesterSettings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
-        url_preserve_empty_path = True
         # tolerate unrelated keys in a host project's .env when used as a library
         extra = "ignore"
 
@@ -27,11 +25,11 @@ class ProductionSettings(HarvesterSettings):
 
 
 class StagingSettings(HarvesterSettings):
-    WAREHOUSE_API_URL: AnyHttpUrl = "http://192.168.10.6:8080" # type: ignore[assignment]
+    WAREHOUSE_API_URL: str = "http://192.168.10.6:8080"
 
 
 class DevSettings(HarvesterSettings):
-    WAREHOUSE_API_URL: AnyHttpUrl = "http://localhost:8080" # type: ignore[assignment]
+    WAREHOUSE_API_URL: str = "http://localhost:8080"
 
 
 class LocalSettings(HarvesterSettings):
