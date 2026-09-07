@@ -1,19 +1,18 @@
-import logging, os, time, json, re, threading, hashlib, xml.etree.ElementTree as ET, requests
-from .db_api_functions import send_harvest_event
-from xml.dom import minidom
-from typing import Any, Callable, Iterator, cast
-from urllib.error import HTTPError
+import asyncio
+import hashlib
+import json
+import logging
+import os
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, AsyncIterator, Callable, cast
+from xml.dom import minidom
 
-from SPARQLWrapper import SPARQLWrapper, JSON as SPARQL_JSON
-from SPARQLWrapper.SPARQLExceptions import (
-    EndPointNotFound,
-    EndPointInternalError,
-    URITooLong,
-    QueryBadFormed,
-    Unauthorized,
-)
+import httpx
+from httpx_retries import Retry, RetryTransport
+
+from .db_api_functions import send_harvest_event
 
 logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,30 +20,34 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ENDPOINT_URL = "https://sparql.knowledgehub.nfdi4earth.de/"
 
 PAGE_SIZE = 5000
-MAX_RETRIES = 3
 
-# --------------------------------------------------------------------------
-# SPARQLWrapper client is NOT thread-safe: setQuery()/queryAndConvert()
-# mutate shared state on the instance. Rather than a single module-level
-# client, give each worker thread its own instance via thread-local
-# storage, so concurrent detail fetches (see run_harvester_nfdi4earth)
-# can't race and cross-contaminate each other's queries/responses.
-# --------------------------------------------------------------------------
-_thread_local = threading.local()
+retry_strategy = Retry(
+    total=8,
+    backoff_factor=0.5,
+)
 
-def get_client() -> SPARQLWrapper:
-    client = getattr(_thread_local, "client", None)
-    if client is None:
-        client = SPARQLWrapper(DEFAULT_ENDPOINT_URL)
-        client.setReturnFormat(SPARQL_JSON)
-        _thread_local.client = client
-    return client
+_ASYNC_NFDI4EARTH_CLIENT = httpx.AsyncClient(
+    transport=RetryTransport(retry=retry_strategy),
+    timeout=httpx.Timeout(120),
+    headers={
+        "Accept": "application/sparql-results+json",
+        "User-Agent": "EOSC Data Commons harvester",
+    },
+)
 
-# How many datasets to fetch detail records for concurrently. This is
-# I/O-bound (waiting on the SPARQL endpoint), so threads help a lot here
-# despite the GIL. Keep this conservative-ish so we don't hammer a shared
-# public endpoint; tune up/down based on observed throttling (429s).
-MAX_WORKERS = 10
+# Bound detail-request concurrency. A single ID page can contain up to
+# PAGE_SIZE records, so an unrestricted gather() could otherwise create
+# thousands of simultaneous requests.
+MAX_CONCURRENT_REQUESTS = 10
+
+
+async def shutdown_async_client() -> None:
+    """Close the shared async HTTP client."""
+    try:
+        await _ASYNC_NFDI4EARTH_CLIENT.aclose()
+        logger.info("Async NFDI4Earth client closed successfully.")
+    except Exception as e:
+        logger.error("Error closing async NFDI4Earth client: %s", e)
 
 
 
@@ -182,99 +185,36 @@ def escape_sparql_string(value: str) -> str:
 
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
-RETRYABLE_SPARQL_EXCEPTIONS = (EndPointNotFound, EndPointInternalError, URITooLong)
-NON_RETRYABLE_SPARQL_EXCEPTIONS = (QueryBadFormed, Unauthorized)
 
 
-
-def execute_query(query: str, context: str) -> dict[str, Any]:
+async def execute_query(query: str, context: str) -> dict[str, Any]:
     """
-    Run a SPARQL query against a thread-local client, retrying on
-    transient errors - either an `HTTPError` with a retryable status code
-    (429, 500, 502, 503, 504), or one of SPARQLWrapper's own transient
-    exception types (`EndPointNotFound`, `EndPointInternalError`,
-    `URITooLong`) - up to `MAX_RETRIES` times.
+    Execute a SPARQL query directly over HTTP using the shared async client.
 
-    :param query: The full SPARQL query text to execute.
-    :param context: A short description used only for log messages
-            (e.g. "ids after=<iri>" or "detail dataset=<iri>").
-
-    :return: The parsed JSON response from the SPARQL endpoint.
+    The RetryTransport handles transient connection/status failures. This
+    function also validates the response and returns the parsed SPARQL JSON.
     """
-    client = get_client()
-    client.setQuery(query)
-
-    response: dict[str, Any] | None = None
-
-    for attempt in range(MAX_RETRIES):
-        is_last_attempt = attempt >= MAX_RETRIES - 1
-
-        try:
-            response = cast(
-                dict[str, Any],
-                client.queryAndConvert(),
-            )
-            break
-
-        except HTTPError as e:
-            if e.code not in RETRYABLE_STATUS_CODES:
-                raise
-
-            if is_last_attempt:
-                logger.error(
-                    "HTTP %d for %s after %d attempts; giving up.",
-                    e.code,
-                    context,
-                    MAX_RETRIES,
-                )
-                raise
-
-            wait = 5 * (attempt + 1)
-            logger.warning(
-                "HTTP %d for %s, retrying in %ds (attempt %d/%d)...",
-                e.code,
-                context,
-                wait,
-                attempt + 1,
-                MAX_RETRIES,
-            )
-            time.sleep(wait)
-
-        except NON_RETRYABLE_SPARQL_EXCEPTIONS:
-            raise
-
-        except RETRYABLE_SPARQL_EXCEPTIONS as e:
-            if is_last_attempt:
-                logger.error(
-                    "%s for %s after %d attempts; giving up.",
-                    type(e).__name__,
-                    context,
-                    MAX_RETRIES,
-                )
-                raise
-
-            wait = 5 * (attempt + 1)
-            logger.warning(
-                "%s for %s, retrying in %ds (attempt %d/%d)...",
-                type(e).__name__,
-                context,
-                wait,
-                attempt + 1,
-                MAX_RETRIES,
-            )
-            time.sleep(wait)
-
-    if response is None:
-        raise RuntimeError(
-            f"_execute_query got no response after "
-            f"{MAX_RETRIES} attempts ({context})"
+    try:
+        response = await _ASYNC_NFDI4EARTH_CLIENT.post(
+            DEFAULT_ENDPOINT_URL,
+            data={"query": query},
         )
+        response.raise_for_status()
+        return cast(dict[str, Any], response.json())
 
-    return response
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "HTTP %d while executing SPARQL query for %s",
+            e.response.status_code,
+            context,
+        )
+        raise
+    except httpx.RequestError as e:
+        logger.error("Network error while executing SPARQL query for %s: %s", context, e)
+        raise
 
 
-
-def search_ids_page(after: str | None, since_filter: str = "") -> list[dict[str, Any]]:
+async def search_ids_page(after: str | None, since_filter: str = "") -> list[dict[str, Any]]:
     """
     Fetch one page of dataset IDs (and, where available, their `dct:issued`
     date) from the NFDI4Earth KnowledgeHub SPARQL endpoint, using keyset
@@ -298,7 +238,7 @@ def search_ids_page(after: str | None, since_filter: str = "") -> list[dict[str,
     )
     query += f"\nLIMIT {PAGE_SIZE}"
 
-    response = execute_query(query, context=f"ids after={after}")
+    response = await execute_query(query, context=f"ids after={after}")
 
     return cast(
         list[dict[str, Any]],
@@ -307,7 +247,7 @@ def search_ids_page(after: str | None, since_filter: str = "") -> list[dict[str,
 
 
 
-def fetch_dataset_detail(dataset_iri: str) -> dict[str, Any] | None:
+async def fetch_dataset_detail(dataset_iri: str) -> dict[str, Any] | None:
     """
     Fetch full metadata for a single dataset from the NFDI4Earth
     KnowledgeHub SPARQL endpoint.
@@ -319,7 +259,7 @@ def fetch_dataset_detail(dataset_iri: str) -> dict[str, Any] | None:
     """
     query = DETAIL_QUERY.replace("@DATASET_IRI@", dataset_iri)
 
-    response = execute_query(query, context=f"detail dataset={dataset_iri}")
+    response = await execute_query(query, context=f"detail dataset={dataset_iri}")
 
     bindings = cast(
         list[dict[str, Any]],
@@ -330,7 +270,7 @@ def fetch_dataset_detail(dataset_iri: str) -> dict[str, Any] | None:
 
 
 
-def search_all_ids() -> Iterator[list[dict[str, Any]]]:
+async def search_all_ids() -> AsyncIterator[list[dict[str, Any]]]:
     """
     Walk every page of dataset IDs from the NFDI4Earth KnowledgeHub SPARQL
     endpoint and yield each page's bindings as they're fetched.
@@ -342,7 +282,7 @@ def search_all_ids() -> Iterator[list[dict[str, Any]]]:
     total_records = 0
     page_num = 1
     while True:
-        page = search_ids_page(after)
+        page = await search_ids_page(after)
 
         if not page:
             logger.info("ID page %d empty, stopping", page_num)
@@ -361,11 +301,11 @@ def search_all_ids() -> Iterator[list[dict[str, Any]]]:
             break
 
         page_num += 1
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
 
 
-def search_incremental_ids(from_date: str, until_date: str) -> Iterator[list[dict[str, Any]]]:
+async def search_incremental_ids(from_date: str, until_date: str) -> AsyncIterator[list[dict[str, Any]]]:
     """
     Walk every page of dataset IDs from the NFDI4Earth KnowledgeHub SPARQL
     endpoint for datasets modified within a date range, and yield each
@@ -390,7 +330,7 @@ def search_incremental_ids(from_date: str, until_date: str) -> Iterator[list[dic
     total_records = 0
     page_num = 1
     while True:
-        page = search_ids_page(after, since_filter)
+        page = await search_ids_page(after, since_filter)
 
         if not page:
             logger.info("ID page %d empty, stopping", page_num)
@@ -409,7 +349,7 @@ def search_incremental_ids(from_date: str, until_date: str) -> Iterator[list[dic
             break
 
         page_num += 1
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
 
 
@@ -438,9 +378,9 @@ def extract_doi(url: str | None) -> str | None:
 
 
 ROR_CACHE: dict[str, dict[str, Any] | None] = {}
-_ROR_CACHE_LOCK = threading.Lock()
+_ROR_CACHE_LOCK = asyncio.Lock()
 
-def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
+async def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
     """Resolve a publisher value containing a ROR ID to name + ROR identifier."""
 
     match = re.search(r"(?:ror-|ror\.org/)([a-z0-9]+)", publisher_url, re.IGNORECASE)
@@ -449,15 +389,14 @@ def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
 
     ror_id = match.group(1).lower()
 
-    # Cache reads/writes come from multiple worker threads once detail
-    # fetching is parallelized; guard with a lock. Worst case without it
-    # is a handful of duplicate ROR API calls
-    with _ROR_CACHE_LOCK:
+    # Prevent concurrent coroutines from issuing duplicate ROR requests
+    # for the same uncached organization.
+    async with _ROR_CACHE_LOCK:
         if ror_id in ROR_CACHE:
             return ROR_CACHE[ror_id]
 
     try:
-        resp = requests.get(
+        resp = await _ASYNC_NFDI4EARTH_CLIENT.get(
             f"https://api.ror.org/organizations/{ror_id}",
             timeout=10,
         )
@@ -508,17 +447,17 @@ def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
             "ror_id": ror_id,
         }
 
-        with _ROR_CACHE_LOCK:
+        async with _ROR_CACHE_LOCK:
             ROR_CACHE[ror_id] = result
         return result
 
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         logger.warning("ROR lookup failed for %s: %s", ror_id, e)
         return None
 
 
 
-def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]:
+async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]:
     """
     Convert an NFDI4Earth KnowledgeHub dataset record into a DataCite 4.6
     XML record wrapped in an OAI-PMH <record> element.
@@ -607,7 +546,7 @@ def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]:
     publisher_list = split_list(publishers_raw, sep=",")
     publisher_el = ET.SubElement(resource, "publisher")
     if publisher_list:
-        resolved = resolve_ror_publisher(publisher_list[0])
+        resolved = await resolve_ror_publisher(publisher_list[0])
         if resolved:
             publisher_el.text = resolved["name"]
             publisher_el.set("publisherIdentifier", f"https://ror.org/{resolved['ror_id']}")
@@ -676,25 +615,26 @@ def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]:
 
 
 
-def process_dataset(
+
+async def process_dataset(
     dataset_iri: str,
     harvest_url: str | None,
     config: dict[str, Any],
     run_info: dict[str, Any],
+    semaphore: asyncio.Semaphore,
 ) -> str:
     """
-    Fetch detail for one dataset, convert it to DataCite XML, and send it
-    as a harvest event. Designed to be run inside a thread pool worker -
-    all state it touches (SPARQL client, ROR cache) is either thread-local
-    or lock-protected.
+    Fetch and process one dataset using async HTTP.
 
-    :return: One of "sent", "failed", or "skipped".
+    SPARQL and ROR HTTP requests are async. send_harvest_event remains
+    synchronous because that matches the other harvester implementation.
     """
     try:
-        detail_record = fetch_dataset_detail(dataset_iri)
+        async with semaphore:
+            detail_record = await fetch_dataset_detail(dataset_iri)
     except Exception:
         logger.exception(
-            "Failed to fetch detail for dataset %s after retries; skipping it.",
+            "Failed to fetch detail for dataset %s; skipping it.",
             dataset_iri,
         )
         return "failed"
@@ -703,10 +643,14 @@ def process_dataset(
         logger.warning("No detail found for dataset %s, skipping", dataset_iri)
         return "skipped"
 
-    xml_out, datestamp = nfdi4earth_data_to_datacite(detail_record)
+    try:
+        xml_out, datestamp = await nfdi4earth_data_to_datacite(detail_record)
+    except Exception:
+        logger.exception("Failed to build metadata for dataset %s", dataset_iri)
+        return "failed"
 
     record_identifier = binding_value(detail_record, "dataset") or dataset_iri
-    
+
     event_payload = {
         "record_identifier": record_identifier,
         "datestamp": datestamp,
@@ -718,101 +662,126 @@ def process_dataset(
         "is_deleted": False,
     }
 
-    return "sent" if send_harvest_event(event_payload) else "failed"
+    try:
+        return "sent" if send_harvest_event(event_payload) else "failed"
+    except Exception:
+        logger.exception("Failed to send harvest event for dataset %s", dataset_iri)
+        return "failed"
 
 
 
-def run_harvester_nfdi4earth(run_info: dict[str, Any]) -> bool:
+async def harvest_nfdi4earth(run_info: dict[str, Any]) -> bool:
     """
-    Run a full (or incremental) NFDI4Earth KnowledgeHub harvest and push
-    each entry to the data warehouse as a harvest event.
+    Async NFDI4Earth harvester.
 
-    Two-step approach: first page through cheap "ID only" queries to get
-    the list of dataset IRIs, then fetch full metadata for datasets in
-    each page concurrently (via a thread pool) through
-    `fetch_dataset_detail`
-
-    :param run_info: Dictionary describing the harvest run.
-
-    :return: `True` if every harvest event was sent successfully (and no
-            unexpected exception occurred), `False` if any event failed to
-            send or an exception was raised during the run.
+    ID pages are fetched sequentially because keyset pagination depends on
+    the final IRI from the preceding page. Dataset detail records inside each
+    page are fetched concurrently with asyncio.gather(), bounded by a
+    semaphore to avoid overwhelming the public SPARQL endpoint.
     """
     record_count = 0
     harvest_events = 0
     failed_events = 0
-    try:
 
+    try:
         config = run_info.get("endpoint_config")
         if config is None:
             raise ValueError("config is missing")
+
         harvest_url = config.get("harvest_url")
         from_date = run_info.get("from_date")
         until_date = run_info.get("until_date")
+
         if until_date is None:
             raise ValueError("Missing until_date parameter")
 
-        id_pages = search_all_ids() if not from_date else search_incremental_ids(from_date, until_date)
+        id_pages = (
+            search_all_ids()
+            if not from_date
+            else search_incremental_ids(from_date, until_date)
+        )
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            for id_page in id_pages:
-                dataset_iris = [
-                    iri
-                    for id_record in id_page
-                    if (iri := binding_value(id_record, "dataset")) is not None
-                ]
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
-                skipped_in_page = len(id_page) - len(dataset_iris)
-                if skipped_in_page:
-                    logger.warning(
-                        "Skipping %d ID record(s) with no dataset IRI in this page",
-                        skipped_in_page,
+        async for id_page in id_pages:
+            dataset_iris = [
+                iri
+                for id_record in id_page
+                if (iri := binding_value(id_record, "dataset")) is not None
+            ]
+
+            skipped_in_page = len(id_page) - len(dataset_iris)
+            if skipped_in_page:
+                logger.warning(
+                    "Skipping %d ID record(s) with no dataset IRI in this page",
+                    skipped_in_page,
+                )
+
+            results = await asyncio.gather(
+                *[
+                    process_dataset(
+                        iri,
+                        harvest_url,
+                        config,
+                        run_info,
+                        semaphore,
                     )
-
-                futures = {
-                    executor.submit(
-                        process_dataset, iri, harvest_url, config, run_info
-                    ): iri
                     for iri in dataset_iris
-                }
+                ],
+                return_exceptions=True,
+            )
 
-                for future in as_completed(futures):
-                    record_count += 1
-                    try:
-                        result = future.result()
-                    except Exception:
-                        # Should be rare - process_dataset already catches
-                        # its own exceptions - but guard against anything
-                        # unexpected escaping so one bad record can't kill
-                        # the whole harvest.
-                        logger.exception(
-                            "Unexpected error processing dataset %s",
-                            futures[future],
-                        )
-                        failed_events += 1
-                        continue
+            for iri, result in zip(dataset_iris, results):
+                record_count += 1
 
-                    if result == "sent":
-                        harvest_events += 1
-                    elif result == "failed":
-                        failed_events += 1
+                if isinstance(result, BaseException):
+                    logger.error(
+                        "Unexpected error processing dataset %s: %s",
+                        iri,
+                        result,
+                    )
+                    failed_events += 1
+                elif result == "sent":
+                    harvest_events += 1
+                elif result == "failed":
+                    failed_events += 1
 
         logger.info(
             "Harvest summary: processed %s records, successfully sent %s of them to the warehouse, "
             "failed to send %s records.",
             record_count,
             harvest_events,
-            failed_events
+            failed_events,
         )
 
         return failed_events == 0
 
     except Exception as e:
-        logger.exception("Unexpected error in run_harvester_nfdi4earth: %s", e)
+        logger.exception("Unexpected error in harvest_nfdi4earth: %s", e)
         logger.info(
             "Harvest summary: processed %s records, successfully sent %s of them to the warehouse, "
             "failed to send %s records.",
             record_count,
             harvest_events,
-            failed_events        )
+            failed_events,
+        )
+        return False
+
+
+
+async def _harvest_and_shutdown(run_info: dict[str, Any]) -> bool:
+    """Run the harvester and close the shared client on the same event loop."""
+    try:
+        return await harvest_nfdi4earth(run_info)
+    finally:
+        await shutdown_async_client()
+
+
+
+def run_harvester_nfdi4earth(run_info: dict[str, Any]) -> bool:
+    """Synchronous entry point used by main.py."""
+    try:
+        return asyncio.run(_harvest_and_shutdown(run_info))
+    except Exception as e:
+        logger.exception("NFDI4Earth harvester crashed: %s", e)
         return False
