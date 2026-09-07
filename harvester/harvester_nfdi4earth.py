@@ -458,7 +458,7 @@ async def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
 
 
 DATASET_IRI_PREFIX = "https://cordra.knowledgehub.nfdi4earth.de/objects/"
-async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]:
+async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str | None]:
     """
     Convert an NFDI4Earth KnowledgeHub dataset record into a DataCite 4.6
     XML record wrapped in an OAI-PMH <record> element.
@@ -503,12 +503,9 @@ async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]
 
     ET.SubElement(header, "identifier").text = record_identifier
 
-    if issued:
-        datestamp_text = issued[:10]
-    else:
-        datestamp_text = datetime.now().date().isoformat()
-
-    ET.SubElement(header, "datestamp").text = datestamp_text
+    datestamp_text = issued[:10] if issued else None
+    if datestamp_text:
+        ET.SubElement(header, "datestamp").text = datestamp_text
 
     metadata = ET.SubElement(oai_record, "metadata")
 
@@ -560,13 +557,9 @@ async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str]
 
     # PUBLICATION YEAR (mandatory)
     if issued:
-        pub_year_source = issued
-    else:
-        pub_year_source = datestamp_text
-
-    year_match = re.search(r"(\d{4})", pub_year_source)
-    if year_match:
-        ET.SubElement(resource, "publicationYear").text = year_match.group(1)
+        year_match = re.search(r"(\d{4})", issued)
+        if year_match:
+            ET.SubElement(resource, "publicationYear").text = year_match.group(1)
 
     # RESOURCE TYPE (mandatory)
     ET.SubElement(resource, "resourceType", resourceTypeGeneral="Dataset").text = "Dataset"
@@ -653,6 +646,9 @@ async def process_dataset(
     record_identifier = (
         binding_value(detail_record, "dataset") or dataset_iri
     ).removeprefix(DATASET_IRI_PREFIX)
+
+    if datestamp is None:
+        datestamp = datetime.now().isoformat()
 
     event_payload = {
         "record_identifier": record_identifier,
