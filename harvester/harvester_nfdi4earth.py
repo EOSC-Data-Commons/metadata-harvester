@@ -647,6 +647,8 @@ async def process_dataset(
         binding_value(detail_record, "dataset") or dataset_iri
     ).removeprefix(DATASET_IRI_PREFIX)
 
+    download_urls = binding_value(detail_record, "download_urls")
+
     if datestamp is None:
         datestamp = datetime.now().isoformat()
 
@@ -654,7 +656,7 @@ async def process_dataset(
         "record_identifier": record_identifier,
         "datestamp": datestamp,
         "raw_metadata": xml_out,
-        "additional_metadata": json.dumps({}),
+        "additional_metadata": json.dumps({"download_urls": split_list(download_urls)}),        
         "harvest_url": harvest_url,
         "repo_code": config.get("code"),
         "harvest_run_id": run_info.get("id"),
