@@ -40,6 +40,12 @@ _ASYNC_NFDI4EARTH_CLIENT = httpx.AsyncClient(
 # thousands of simultaneous requests.
 MAX_CONCURRENT_REQUESTS = 10
 
+# How long to wait for a single send_harvest_event call (run in a worker
+# thread) before giving up on it. send_harvest_event is synchronous, so it
+# must never be awaited directly in this event loop - it would block every
+# other concurrent task while it waits on I/O.
+SEND_EVENT_TIMEOUT = 60
+
 
 async def shutdown_async_client() -> None:
     """Close the shared async HTTP client."""
@@ -93,11 +99,7 @@ WHERE {
   }
 
   OPTIONAL {
-    SELECT (SAMPLE(?d) AS ?description)
-    WHERE {
-      BIND(<@DATASET_IRI@> AS ?dataset)
-      ?dataset schema:description ?d .
-    }
+    ?dataset schema:description ?description .
   }
 
   OPTIONAL {
@@ -377,86 +379,6 @@ def extract_doi(url: str | None) -> str | None:
 
 
 
-ROR_CACHE: dict[str, dict[str, Any] | None] = {}
-_ROR_CACHE_LOCK = asyncio.Lock()
-
-async def resolve_ror_publisher(publisher_url: str) -> dict[str, Any] | None:
-    """Resolve a publisher value containing a ROR ID to name + ROR identifier."""
-
-    match = re.search(r"(?:ror-|ror\.org/)([a-z0-9]+)", publisher_url, re.IGNORECASE)
-    if not match:
-        return None
-
-    ror_id = match.group(1).lower()
-
-    # Prevent concurrent coroutines from issuing duplicate ROR requests
-    # for the same uncached organization.
-    async with _ROR_CACHE_LOCK:
-        if ror_id in ROR_CACHE:
-            return ROR_CACHE[ror_id]
-
-    try:
-        resp = await _ASYNC_NFDI4EARTH_CLIENT.get(
-            f"https://api.ror.org/organizations/{ror_id}",
-            timeout=10,
-        )
-        resp.raise_for_status()
-
-        data: dict[str, Any] = resp.json()
-        names: list[dict[str, Any]] = data.get("names", [])
-
-        name = next(
-            (
-                n["value"]
-                for n in names
-                if "ror_display" in n.get("types", [])
-                and n.get("value")
-            ),
-            None,
-        )
-
-        if not name:
-            name = next(
-                (
-                    n["value"]
-                    for n in names
-                    if n.get("lang") == "en"
-                    and "acronym" not in n.get("types", [])
-                    and n.get("value")
-                ),
-                None,
-            )
-
-        if not name:
-            name = next(
-                (
-                    n["value"]
-                    for n in names
-                    if "acronym" not in n.get("types", [])
-                    and n.get("value")
-                ),
-                None,
-            )
-
-        if not name:
-            logger.warning("No usable name found for ROR %s", ror_id)
-            return None
-
-        result = {
-            "name": str(name),
-            "ror_id": ror_id,
-        }
-
-        async with _ROR_CACHE_LOCK:
-            ROR_CACHE[ror_id] = result
-        return result
-
-    except httpx.RequestError as e:
-        logger.warning("ROR lookup failed for %s: %s", ror_id, e)
-        return None
-
-
-
 DATASET_IRI_PREFIX = "https://cordra.knowledgehub.nfdi4earth.de/objects/"
 async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str | None]:
     """
@@ -540,20 +462,10 @@ async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str 
     titles = ET.SubElement(resource, "titles")
     ET.SubElement(titles, "title").text = title
 
-    # PUBLISHER (mandatory)
+    # PUBLISHER (mandatory) - raw value from SPARQL, no external resolution
     publisher_list = split_list(publishers_raw, sep=",")
     publisher_el = ET.SubElement(resource, "publisher")
-    if publisher_list:
-        resolved = await resolve_ror_publisher(publisher_list[0])
-        if resolved:
-            publisher_el.text = resolved["name"]
-            publisher_el.set("publisherIdentifier", f"https://ror.org/{resolved['ror_id']}")
-            publisher_el.set("publisherIdentifierScheme", "ROR")
-            publisher_el.set("schemeURI", "https://ror.org")
-        else:
-            publisher_el.text = publisher_list[0]  # fall back to raw URL if resolution fails
-    else:
-        publisher_el.text = "unknown"
+    publisher_el.text = publisher_list[0] if publisher_list else "unknown"
 
     # PUBLICATION YEAR (mandatory)
     if issued:
@@ -584,7 +496,7 @@ async def nfdi4earth_data_to_datacite(record: dict[str, Any]) -> tuple[str, str 
             ET.SubElement(related, "relatedIdentifier", relatedIdentifierType="URL", relationType="IsSourceOf").text = url
 
     # SUBJECTS
-    keywords = split_list(keywords_raw, sep=",")
+    keywords = split_list(keywords_raw, sep=",")[:10]
     if keywords:
         subjects_el = ET.SubElement(resource, "subjects")
         for word in keywords:
@@ -620,8 +532,11 @@ async def process_dataset(
     """
     Fetch and process one dataset using async HTTP.
 
-    SPARQL and ROR HTTP requests are async. send_harvest_event remains
-    synchronous because that matches the other harvester implementation.
+    SPARQL HTTP requests are async. send_harvest_event remains a synchronous
+    function (it matches the other harvester implementation), so it is run
+    in a worker thread via asyncio.to_thread with a hard timeout - calling
+    it directly would block this entire event loop (and every other
+    concurrent task) for as long as it's stuck waiting on I/O.
     """
     try:
         async with semaphore:
@@ -647,16 +562,20 @@ async def process_dataset(
         binding_value(detail_record, "dataset") or dataset_iri
     ).removeprefix(DATASET_IRI_PREFIX)
 
-    download_urls = binding_value(detail_record, "download_urls")
+    download_url_list = split_list(binding_value(detail_record, "download_urls"))
 
     if datestamp is None:
         datestamp = datetime.now().isoformat()
+
+    additional_metadata = (
+        json.dumps({"download_urls": download_url_list}) if download_url_list else None
+    )
 
     event_payload = {
         "record_identifier": record_identifier,
         "datestamp": datestamp,
         "raw_metadata": xml_out,
-        "additional_metadata": json.dumps({"download_urls": split_list(download_urls)}),        
+        "additional_metadata": additional_metadata,
         "harvest_url": harvest_url,
         "repo_code": config.get("code"),
         "harvest_run_id": run_info.get("id"),
@@ -664,7 +583,18 @@ async def process_dataset(
     }
 
     try:
-        return "sent" if send_harvest_event(event_payload) else "failed"
+        result = await asyncio.wait_for(
+            asyncio.to_thread(send_harvest_event, event_payload),
+            timeout=SEND_EVENT_TIMEOUT,
+        )
+        return "sent" if result else "failed"
+    except asyncio.TimeoutError:
+        logger.error(
+            "send_harvest_event timed out after %ss for dataset %s",
+            SEND_EVENT_TIMEOUT,
+            dataset_iri,
+        )
+        return "failed"
     except Exception:
         logger.exception("Failed to send harvest event for dataset %s", dataset_iri)
         return "failed"
