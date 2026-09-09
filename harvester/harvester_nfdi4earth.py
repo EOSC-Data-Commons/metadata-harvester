@@ -1,12 +1,11 @@
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Any, AsyncIterator, Callable, cast
+from typing import Any, AsyncIterator, cast
 from xml.dom import minidom
 
 import httpx
@@ -21,15 +20,17 @@ DEFAULT_ENDPOINT_URL = "https://sparql.knowledgehub.nfdi4earth.de/"
 
 PAGE_SIZE = 5000
 
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
 retry_strategy = Retry(
-    total=8,
-    backoff_factor=0.5,
+    total = 8,
+    backoff_factor = 0.5,
 )
 
 _ASYNC_NFDI4EARTH_CLIENT = httpx.AsyncClient(
-    transport=RetryTransport(retry=retry_strategy),
-    timeout=httpx.Timeout(120),
-    headers={
+    transport = RetryTransport(retry = retry_strategy),
+    timeout = httpx.Timeout(120),
+    headers = {
         "Accept": "application/sparql-results+json",
         "User-Agent": "EOSC Data Commons harvester",
     },
@@ -186,9 +187,6 @@ def escape_sparql_string(value: str) -> str:
 
 
 
-RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
-
-
 async def execute_query(query: str, context: str) -> dict[str, Any]:
     """
     Execute a SPARQL query directly over HTTP using the shared async client.
@@ -214,6 +212,7 @@ async def execute_query(query: str, context: str) -> dict[str, Any]:
     except httpx.RequestError as e:
         logger.error("Network error while executing SPARQL query for %s: %s", context, e)
         raise
+
 
 
 async def search_ids_page(after: str | None, since_filter: str = "") -> list[dict[str, Any]]:
