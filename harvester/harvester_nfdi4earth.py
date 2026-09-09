@@ -25,6 +25,7 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 retry_strategy = Retry(
     total = 8,
     backoff_factor = 0.5,
+    status_forcelist = RETRYABLE_STATUS_CODES
 )
 
 _ASYNC_NFDI4EARTH_CLIENT = httpx.AsyncClient(
