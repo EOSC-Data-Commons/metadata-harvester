@@ -19,7 +19,6 @@ dependencies = [
     "pydantic-core>=2.41.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
-    "requests>=2.31.0",
     "SPARQLWrapper>=2.0.0",
     "typing-extensions>=4.15.0",
     "typing-inspection>=0.4.2",
