@@ -686,7 +686,10 @@ async def harvest_nfdi4earth(run_info: dict[str, Any]) -> bool:
             failed_events,
         )
 
-        return failed_events == 0
+        if failed_events > 50:
+            return False
+        else:
+            return True
 
     except Exception as e:
         logger.exception("Unexpected error in harvest_nfdi4earth: %s", e)
