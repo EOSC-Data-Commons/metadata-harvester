@@ -19,7 +19,7 @@ It performs the following tasks:
 ## Architecture
 The package consists of the following components:
 - main.py - entry point that namages harvest runs, fetches config info and runs the appropriate harvesting module
-- db_api_functions.py - contains functions used to communicate with the database API 
+- db_api_functions.py - contains functions used to communicate with the database API
 - harvester_oaipmh.py - harvesting module for repositories that expose metadata via OAI-PMH
 - harvester_finbif.py - harvesting module for FinBIF repository
 - dc_to_datacite.xsl - XSLT stylesheet that transforms metadata format from Dublin Core to DataCite format
@@ -30,7 +30,7 @@ The package consists of the following components:
 ## Requirements
 - [Python](https://www.python.org/downloads/) >= 3.12
 - Install `uv`, see [docs](https://docs.astral.sh/uv/getting-started/installation/)
-- Dependencies are listed in `pyproject.toml`, 
+- Dependencies are listed in `pyproject.toml`,
   install with `uv sync --locked --all-extras --group dev` for local development
 
 ## Environment configuration
@@ -54,7 +54,39 @@ WAREHOUSE_API_URL=http://localhost:8000
 - ```WAREHOUSE_API_URL``` must point to the Warehouse API instance the harvester will send results to.
 For Docker execution, the ```WAREHOUSE_API_URL``` can be set in ```docker-compose.yml```.
 
+## Install as a Python package
+
+The harvester can be installed straight from GitHub and used as a library:
+
+```sh
+pip install git+https://github.com/EOSC-Data-Commons/metadata-crawlers.git
+# or with uv
+uv add git+https://github.com/EOSC-Data-Commons/metadata-crawlers.git
+```
+
+Then invoke the harvesting process from Python with `run_harvest()`, passing a `HarvesterSettings` object instead of relying on a `.env` file:
+
+```python
+from harvester import HarvesterSettings, run_harvest
+
+success = run_harvest(
+    "https://example.org/oai",  # repository harvesting endpoint
+    settings=HarvesterSettings(
+        WAREHOUSE_API_URL="http://localhost:8000",
+        WAREHOUSE_API_TIMEOUT=30,  # optional, defaults to 30
+        LOG_DIR="./logs",          # optional, defaults to ./logs
+        LOG_LEVEL="INFO",          # optional, defaults to INFO
+    ),
+    setup_logs=True,  # optional, set False to keep your own logging config
+)
+```
+
+Omitting `settings` falls back to the environment profile: the `ENVIRONMENT` variable, the `.env` file, then the defaults in `settings.py`. Unrelated keys in your own `.env` are ignored, so the package is safe to import into an existing project.
+
+Installing the package also provides a `metadata-harvester {repository URL}` command.
+
 ## Running Locally
+
 To run the harvester directly on your machine:
 1. Ensure ```.env``` exists in the project root and the required values have been filled
 2. Run the following:
@@ -99,7 +131,7 @@ Future versions of this package will support additional crawling protocols.
 This project is licensed under the Apache License 2.0.
 See the LICENSE file for details.
 
-This project uses the [oaipmh-scythe](https://github.com/afuetterer/oaipmh-scythe) Python client,  
+This project uses the [oaipmh-scythe](https://github.com/afuetterer/oaipmh-scythe) Python client,
 which is distributed under the BSD license.
-The BSD license is a permissive open source license that allows use, modification, and distribution.  
+The BSD license is a permissive open source license that allows use, modification, and distribution.
 For full license details, see the [oaipmh-scythe license](https://github.com/afuetterer/oaipmh-scythe/blob/master/LICENSE).

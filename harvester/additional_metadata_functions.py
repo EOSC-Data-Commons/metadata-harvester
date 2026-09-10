@@ -6,17 +6,29 @@ from typing import Any
 from oaipmh_scythe import Scythe
 from lxml import etree as ET
 
-# shared http client for Dataverse requests
-_DATAVERSE_CLIENT = httpx.Client(timeout = 30)
+_DATAVERSE_CLIENT: Optional[httpx.Client] = None
 
 logger = logging.getLogger(__name__)
 
+
+def _dataverse_client() -> httpx.Client:
+    """Return the shared Dataverse HTTP client, creating it if needed."""
+    global _DATAVERSE_CLIENT
+    if _DATAVERSE_CLIENT is None:
+        _DATAVERSE_CLIENT = httpx.Client(timeout = 30)
+    return _DATAVERSE_CLIENT
+
+
 def close_dataverse_client() -> None:
+    global _DATAVERSE_CLIENT
+    if _DATAVERSE_CLIENT is None:
+        return
     try:
         _DATAVERSE_CLIENT.close()
     except Exception:
         logger.warning("Failed to close Dataverse client")
-        pass
+    finally:
+        _DATAVERSE_CLIENT = None
 
 
 def fetch_dataverse_json(doi: str, base_url: str, exporter: str | None) -> Optional[str]:
@@ -30,7 +42,7 @@ def fetch_dataverse_json(doi: str, base_url: str, exporter: str | None) -> Optio
     """
     params = {"exporter": exporter, "persistentId": doi}
     try:
-        response = _DATAVERSE_CLIENT.get(base_url, params=params)
+        response = _dataverse_client().get(base_url, params=params)
         response.raise_for_status()
         return json.dumps(response.json(), indent=2)
     except httpx.HTTPStatusError as e:
@@ -72,7 +84,7 @@ def fetch_additional_metadata_hal(record_id: str, base_url: str) -> Optional[str
     }
 
     try:
-        response = _DATAVERSE_CLIENT.get(base_url, params=params)
+        response = _dataverse_client().get(base_url, params=params)
         response.raise_for_status()
         data = response.json()
         if not data.get("response", {}).get("docs"):

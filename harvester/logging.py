@@ -2,9 +2,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import os
-from harvester.settings import settings
+from harvester.settings import current_settings
 
 def setup_logging() -> None:
+    settings = current_settings()
     log_dir = Path(settings.LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)
 
