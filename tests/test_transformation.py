@@ -6,6 +6,9 @@ from typing import Any
 from harvester.harvester_oaipmh import transformation_and_additional_metadata, run_harvester_oaipmh
 from oaipmh_scythe.models import Record
 
+from oaipmh_scythe.exceptions import NoRecordsMatch
+from harvester.harvester_oaipmh import fetch_records_by_sets
+
 # -----------------------------
 # Test helpers (file loading & normalization)
 # -----------------------------
@@ -251,3 +254,59 @@ class TestRunHarvester(unittest.TestCase):
         mock_transform.assert_not_called() # deleted records must not be transformed
         payload = mock_send.call_args[0][0] # ensure deletion flag is preserved in outgoing payload
         self.assertTrue(payload["is_deleted"])
+
+
+
+class TestFetchRecordsBySets(unittest.TestCase):
+
+    # Case 1: single set, endpoint returns noRecordsMatch -> empty result, no crash
+    def test_no_records_match_single_set(self) -> None:
+        mock_client = Mock()
+
+        def raise_no_records(*args, **kwargs):
+            raise NoRecordsMatch("no records found")
+            yield  # unreachable; keeps this a generator function so the
+                   # exception only fires on iteration, like the real client
+
+        mock_client.list_records.side_effect = raise_no_records
+
+        result = list(fetch_records_by_sets(
+            client = mock_client,
+            sets = [None],
+            from_ = None,
+            from_date = None,
+            until_ = None,
+            metadata_prefix = "oai_dc"
+        ))
+
+        self.assertEqual(result, [])
+        mock_client.list_records.assert_called_once()
+
+    # Case 2: multiple sets, first raises noRecordsMatch, second yields records ->
+    # harvesting should continue past the empty set instead of stopping
+    def test_no_records_match_continues_to_next_set(self) -> None:
+        mock_client = Mock()
+        good_record = Mock(spec = Record)
+
+        def raise_no_records(*args, **kwargs):
+            raise NoRecordsMatch("no records found")
+            yield
+
+        def list_records_side_effect(*args, **kwargs):
+            if kwargs.get("set_") == "empty-set":
+                return raise_no_records()
+            return iter([good_record])
+
+        mock_client.list_records.side_effect = list_records_side_effect
+
+        result = list(fetch_records_by_sets(
+            client = mock_client,
+            sets = ["empty-set", "populated-set"],
+            from_ = None,
+            from_date = None,
+            until_ = None,
+            metadata_prefix = "oai_dc"
+        ))
+
+        self.assertEqual(result, [good_record])
+        self.assertEqual(mock_client.list_records.call_count, 2)

@@ -7,6 +7,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from oaipmh_scythe.models import Record
+from oaipmh_scythe.exceptions import NoRecordsMatch
 
 from .additional_metadata_functions import fetch_dataverse_json, fetch_additional_oai, fetch_additional_metadata_hal, \
     fetch_additional_metadata_zenodo
@@ -254,7 +255,15 @@ def fetch_records_by_sets(client: Scythe, sets: Iterable[str | None], from_: str
                 set_ = set_name, 
                 ignore_deleted = True
             )
-        yield from records
+
+        try:
+            yield from records
+        except NoRecordsMatch:
+            logger.info(
+                "No new records for set %s (from=%s, until=%s) — nothing to harvest.",
+                set_name, from_, until_
+            )
+            continue
 
 
 
