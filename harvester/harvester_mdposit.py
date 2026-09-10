@@ -152,8 +152,8 @@ def fetch_incremental_projects_data(base_api_url: str, from_date: str, headers: 
     # fetching all filtered projects 
     projects : list[dict[str, Any]] = []
     page = 1
-    params_filtered : dict[str, str | int] = {"limit": 100, "page": page, "query": json.dumps(query)}
     while len(projects) < number_of_filtered_objects:
+        params_filtered : dict[str, str | int] = {"limit": 100, "page": page, "query": json.dumps(query)}
         response = _MDPOSIT_CLIENT.get(
             f"{base_api_url}/projects",
             headers = headers,
