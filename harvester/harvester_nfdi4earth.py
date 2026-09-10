@@ -533,6 +533,13 @@ async def process_dataset(
     """
     Fetch and process one dataset using async HTTP.
 
+    Returns one of:
+      - "sent"          : successfully delivered to the warehouse
+      - "skipped"       : no detail record found for this dataset (not an error)
+      - "source_error"  : NFDI4Earth-side problem (fetch failed, malformed data,
+                           query rejected, etc.) - not something we can fix
+      - "send_error"    : our warehouse API failed to accept the record
+
     SPARQL HTTP requests are async. send_harvest_event remains a synchronous
     function (it matches the other harvester implementation), so it is run
     in a worker thread via asyncio.to_thread with a hard timeout - calling
@@ -547,7 +554,7 @@ async def process_dataset(
             "Failed to fetch detail for dataset %s; skipping it.",
             dataset_iri,
         )
-        return "failed"
+        return "source_error"
 
     if detail_record is None:
         logger.warning("No detail found for dataset %s, skipping", dataset_iri)
@@ -557,7 +564,7 @@ async def process_dataset(
         xml_out, datestamp = await nfdi4earth_data_to_datacite(detail_record)
     except Exception:
         logger.exception("Failed to build metadata for dataset %s", dataset_iri)
-        return "failed"
+        return "source_error"
 
     record_identifier = (
         binding_value(detail_record, "dataset") or dataset_iri
@@ -588,17 +595,17 @@ async def process_dataset(
             asyncio.to_thread(send_harvest_event, event_payload),
             timeout=SEND_EVENT_TIMEOUT,
         )
-        return "sent" if result else "failed"
+        return "sent" if result else "send_error"
     except asyncio.TimeoutError:
         logger.error(
             "send_harvest_event timed out after %ss for dataset %s",
             SEND_EVENT_TIMEOUT,
             dataset_iri,
         )
-        return "failed"
+        return "send_error"
     except Exception:
         logger.exception("Failed to send harvest event for dataset %s", dataset_iri)
-        return "failed"
+        return "send_error"
 
 
 
@@ -613,7 +620,9 @@ async def harvest_nfdi4earth(run_info: dict[str, Any]) -> bool:
     """
     record_count = 0
     harvest_events = 0
-    failed_events = 0
+    skipped_events = 0
+    source_errors = 0
+    send_errors = 0
 
     try:
         config = run_info.get("endpoint_config")
@@ -672,21 +681,32 @@ async def harvest_nfdi4earth(run_info: dict[str, Any]) -> bool:
                         iri,
                         result,
                     )
-                    failed_events += 1
+                    source_errors += 1
                 elif result == "sent":
                     harvest_events += 1
-                elif result == "failed":
-                    failed_events += 1
+                elif result == "skipped":
+                    skipped_events += 1
+                elif result == "source_error":
+                    source_errors += 1
+                elif result == "send_error":
+                    send_errors += 1
 
         logger.info(
-            "Harvest summary: processed %s records, successfully sent %s of them to the warehouse, "
-            "failed to send %s records.",
+            "Harvest summary: processed %s records - %s sent to the warehouse, "
+            "%s skipped (no detail available), %s unavailable from source "
+            "(NFDI4Earth-side errors), %s failed to send to warehouse "
+            "(our-side errors).",
             record_count,
             harvest_events,
-            failed_events,
+            skipped_events,
+            source_errors,
+            send_errors,
         )
 
-        if failed_events > 50:
+        # This is an exception considering how harvester normally works and it is
+        # done like this because from almost million of records, few of those could
+        # fail harvesting and we do not want that those few are marking whole harvest_run as failed
+        if skipped_events + source_errors + send_errors > 50:
             return False
         else:
             return True
@@ -694,11 +714,15 @@ async def harvest_nfdi4earth(run_info: dict[str, Any]) -> bool:
     except Exception as e:
         logger.exception("Unexpected error in harvest_nfdi4earth: %s", e)
         logger.info(
-            "Harvest summary: processed %s records, successfully sent %s of them to the warehouse, "
-            "failed to send %s records.",
+            "Harvest summary: processed %s records - %s sent to the warehouse, "
+            "%s skipped (no detail available), %s unavailable from source "
+            "(NFDI4Earth-side errors), %s failed to send to warehouse "
+            "(our-side errors).",
             record_count,
             harvest_events,
-            failed_events,
+            skipped_events,
+            source_errors,
+            send_errors,
         )
         return False
 
